@@ -1,0 +1,6 @@
+{
+  "name": "FreshFood Rocks - Monarch IDE & Cloud Studio",
+  "description": "Professional web-based Monarch IDE & Cloud Studio SPA with Monaco editor, Chrome Extension cloud bridge, multi-file workspace, and GitHub Pages deployment for ide.freshfood.rocks.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
