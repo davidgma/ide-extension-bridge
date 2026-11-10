@@ -3,7 +3,8 @@ import {
   Plug,
   HardDrive, 
   Terminal,
-  Bell
+  Bell,
+  Bug
 } from 'lucide-react';
 import { CloudFile, ExtensionStatus, ExtensionHandshakeInfo } from '../types/ide';
 import { getMonacoLanguage } from '../utils/fileSystem';
@@ -21,6 +22,8 @@ interface StatusBarProps {
   onOpenBridgeModal: () => void;
   onToggleConsole: () => void;
   isConsoleOpen: boolean;
+  onToggleDebugger: () => void;
+  isDebuggerOpen: boolean;
 }
 
 export const StatusBar: React.FC<StatusBarProps> = ({
@@ -35,6 +38,8 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   onOpenBridgeModal,
   onToggleConsole,
   isConsoleOpen,
+  onToggleDebugger,
+  isDebuggerOpen,
 }) => {
   const language = activeFile ? getMonacoLanguage(activeFile.name) : 'plaintext';
 
@@ -84,9 +89,23 @@ export const StatusBar: React.FC<StatusBarProps> = ({
             className="text-zinc-500 hover:text-zinc-300 text-[10px] ml-1"
             title="Inspect Extension Bridge Protocol"
           >
-            [Logs]
+            [Protocol Docs]
           </button>
         </div>
+
+        {/* Toggle Debugger Drawer */}
+        <button
+          onClick={onToggleDebugger}
+          className={`flex items-center gap-1 px-2 py-0.2 rounded font-semibold text-[10.5px] transition ${
+            isDebuggerOpen
+              ? 'bg-emerald-600 text-black shadow'
+              : 'bg-zinc-850 hover:bg-zinc-800 text-emerald-400 border border-emerald-500/30'
+          }`}
+          title="Toggle Extension Communication Debug Log Drawer"
+        >
+          <Bug className="w-3 h-3" />
+          <span>Extension Debugger</span>
+        </button>
 
         {/* Toggle Output Console */}
         <button

@@ -13,6 +13,7 @@ import { Sidebar } from './components/Sidebar';
 import { TabsBar } from './components/TabsBar';
 import { EditorArea } from './components/EditorArea';
 import { OutputConsole } from './components/OutputConsole';
+import { ExtensionDebugger } from './components/ExtensionDebugger';
 import { StatusBar } from './components/StatusBar';
 import { ExtensionBridgeModal } from './components/ExtensionBridgeModal';
 import { QuickOpenModal } from './components/QuickOpenModal';
@@ -48,6 +49,9 @@ export default function App() {
   const [isConsoleOpen, setIsConsoleOpen] = useState(false);
   const [isRunningCode, setIsRunningCode] = useState(false);
 
+  // State: Extension Debugger Drawer
+  const [isDebuggerOpen, setIsDebuggerOpen] = useState(false);
+
   // State: Modals & Notification
   const [isBridgeModalOpen, setIsBridgeModalOpen] = useState(false);
   const [isQuickOpenOpen, setIsQuickOpenOpen] = useState(false);
@@ -63,7 +67,7 @@ export default function App() {
     }, 3500);
   }, []);
 
-  // Extension Bridge Hook with manual start/stop
+  // Extension Bridge Hook
   const {
     extensionStatus,
     handshakeInfo,
@@ -73,6 +77,7 @@ export default function App() {
     stopBridge,
     saveCloudFile,
     saveAllCloudFiles,
+    testSaveRequest,
     simulateHandshake,
     simulateLoadPreset,
     clearLogs,
@@ -96,7 +101,6 @@ export default function App() {
       if (provider) setCloudProvider(provider);
       if (newWorkspaceName) setWorkspaceName(newWorkspaceName);
 
-      // Open and focus the received file (or first file in batch)
       const primaryFile = incomingFiles[0];
       setOpenTabs(prevTabs => {
         const exists = prevTabs.some(t => t.fileId === primaryFile.id || t.path === primaryFile.path);
@@ -191,10 +195,12 @@ export default function App() {
     );
   }, []);
 
-  // Save current file
+  // Save current file (and automatically open debugger panel if save fails or is sent)
   const handleSaveCurrent = useCallback(() => {
     if (activeFile) {
       saveCloudFile(activeFile);
+      // Auto-open Debugger drawer on save so user immediately sees live outgoing message and response!
+      setIsDebuggerOpen(true);
     }
   }, [activeFile, saveCloudFile]);
 
@@ -203,9 +209,10 @@ export default function App() {
     const dirtyFiles = files.filter(f => f.isDirty);
     if (dirtyFiles.length > 0) {
       saveAllCloudFiles(dirtyFiles);
-      notify(`Saved ${dirtyFiles.length} changed files to ${cloudProvider}`);
+      setIsDebuggerOpen(true);
+      notify(`Saving ${dirtyFiles.length} files to ${cloudProvider}...`);
     } else {
-      notify('All files are up-to-date in cloud');
+      notify('All files are up-to-date');
     }
   }, [files, saveAllCloudFiles, cloudProvider, notify]);
 
@@ -219,7 +226,7 @@ export default function App() {
       setConsoleResult(res);
       setIsRunningCode(false);
       if (res.success) {
-        notify(`Executed ${activeFile.name} successfully`);
+        notify(`Executed ${activeFile.name}`);
       } else {
         notify(`Execution error in ${activeFile.name}`);
       }
@@ -277,7 +284,7 @@ export default function App() {
     notify(`Renamed to ${newName}`);
   }, [notify]);
 
-  // Upload files from local machine
+  // Upload files
   const handleUploadFiles = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const fileList = e.target.files;
     if (!fileList || fileList.length === 0) return;
@@ -355,25 +362,21 @@ export default function App() {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       const isCmdOrCtrl = e.metaKey || e.ctrlKey;
 
-      // Cmd+S: Save
       if (isCmdOrCtrl && e.key.toLowerCase() === 's') {
         e.preventDefault();
         handleSaveCurrent();
       }
 
-      // Cmd+P: Quick open
       if (isCmdOrCtrl && e.key.toLowerCase() === 'p') {
         e.preventDefault();
         setIsQuickOpenOpen(true);
       }
 
-      // Cmd+Shift+F: Global search
       if (isCmdOrCtrl && e.shiftKey && e.key.toLowerCase() === 'f') {
         e.preventDefault();
         setIsSearchOpen(true);
       }
 
-      // Cmd+B: Toggle sidebar
       if (isCmdOrCtrl && e.key.toLowerCase() === 'b') {
         e.preventDefault();
         setIsSidebarOpen(prev => !prev);
@@ -386,7 +389,7 @@ export default function App() {
 
   return (
     <div className="h-screen w-screen flex flex-col bg-[#18181b] text-zinc-200 select-none overflow-hidden">
-      {/* Top Header with manual extension bridge start/stop and Run button */}
+      {/* Top Header */}
       <Header
         activeFile={activeFile}
         files={files}
@@ -413,7 +416,7 @@ export default function App() {
         onOpenShortcutsModal={() => setIsShortcutsOpen(true)}
       />
 
-      {/* Main Workspace: Sidebar + Editor + Console */}
+      {/* Main Workspace: Sidebar + Editor + Drawers */}
       <div className="flex-1 flex overflow-hidden">
         {isSidebarOpen && (
           <Sidebar
@@ -462,6 +465,18 @@ export default function App() {
               />
             </div>
 
+            {/* Extension Debugger Log Panel */}
+            <ExtensionDebugger
+              isOpen={isDebuggerOpen}
+              messagesLog={messagesLog}
+              extensionStatus={extensionStatus}
+              handshakeInfo={handshakeInfo}
+              onClose={() => setIsDebuggerOpen(false)}
+              onClearLogs={clearLogs}
+              onTestSaveRequest={testSaveRequest}
+              onPingExtension={startBridge}
+            />
+
             {/* Output / Terminal Drawer */}
             <OutputConsole
               isOpen={isConsoleOpen}
@@ -490,6 +505,8 @@ export default function App() {
         onOpenBridgeModal={() => setIsBridgeModalOpen(true)}
         onToggleConsole={() => setIsConsoleOpen(prev => !prev)}
         isConsoleOpen={isConsoleOpen}
+        onToggleDebugger={() => setIsDebuggerOpen(prev => !prev)}
+        isDebuggerOpen={isDebuggerOpen}
       />
 
       {/* Extension Bridge Console & Inspector Modal */}

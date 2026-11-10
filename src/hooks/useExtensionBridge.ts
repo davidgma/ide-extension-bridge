@@ -20,6 +20,7 @@ export function useExtensionBridge({
 
   const pingTimeoutRef = useRef<number | null>(null);
   const saveTimeoutRef = useRef<number | null>(null);
+  const saveStartTimeRef = useRef<Record<string, number>>({});
   const isRunningRef = useRef(false);
   const hasBootProcessedRef = useRef(false);
   const lastProcessedPayloadHashRef = useRef<string>('');
@@ -41,16 +42,33 @@ export function useExtensionBridge({
     onFileSaveErrorRef.current = onFileSaveError;
   }, [onFileSaveError]);
 
-  // Record messages in inspector log (capped at 50)
-  const logMessage = useCallback((direction: 'incoming' | 'outgoing', type: string, payload: any) => {
+  // High precision log message helper
+  const logMessage = useCallback((
+    direction: 'incoming' | 'outgoing' | 'event',
+    type: string,
+    payload: any,
+    channel: 'postMessage' | 'BroadcastChannel' | 'CustomEvent' | 'localStorage' | 'system' = 'postMessage',
+    status: 'sent' | 'received' | 'acknowledged' | 'error' | 'timeout' = 'sent',
+    roundtripMs?: number,
+    response?: any
+  ) => {
+    const now = new Date();
+    const formattedTime = `${now.toLocaleTimeString([], { hour12: false })}.${String(now.getMilliseconds()).padStart(3, '0')}`;
+
     const entry: BridgeMessage = {
       id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       direction,
       type,
+      channel,
       payload,
+      response,
+      status,
+      roundtripMs,
       timestamp: Date.now(),
+      formattedTime,
     };
-    setMessagesLog(prev => [entry, ...prev.slice(0, 49)]);
+
+    setMessagesLog(prev => [entry, ...prev.slice(0, 99)]); // Capped at 100 entries
     return entry;
   }, []);
 
@@ -59,10 +77,12 @@ export function useExtensionBridge({
     logMessageRef.current = logMessage;
   }, [logMessage]);
 
-  // Post message to extension across ALL Web Extension communication vectors
-  const postToExtension = useCallback((type: string, payload: any = {}) => {
-    logMessageRef.current('outgoing', type, payload);
-
+  // Post message across ALL Web Extension communication channels
+  const postToExtension = useCallback((
+    type: string,
+    payload: any = {},
+    channelTarget: 'postMessage' | 'BroadcastChannel' | 'CustomEvent' | 'localStorage' = 'postMessage'
+  ) => {
     const messageEnvelope = {
       source: 'FRESHFOOD_MONARCH_IDE',
       type,
@@ -79,18 +99,20 @@ export function useExtensionBridge({
       timestamp: Date.now(),
     };
 
-    // 1. window.postMessage (intercepted by content script)
+    logMessageRef.current('outgoing', type, messageEnvelope, channelTarget, 'sent');
+
+    // 1. window.postMessage
     window.postMessage(messageEnvelope, '*');
 
-    // 2. CustomEvent dispatch
+    // 2. CustomEvent
     try {
       window.dispatchEvent(new CustomEvent(type, { detail: messageEnvelope }));
-      window.dispatchEvent(new CustomEvent('FRESHFOOD_SAVE_EVENT', { detail: messageEnvelope }));
+      window.dispatchEvent(new CustomEvent('FRESHFOOD_MONARCH_SAVE', { detail: messageEnvelope }));
     } catch {
       // Ignored
     }
 
-    // 3. BroadcastChannel dispatch
+    // 3. BroadcastChannel
     try {
       if (typeof BroadcastChannel !== 'undefined') {
         const bc = new BroadcastChannel('CLOCKIE_MCCLOCKFACE_BRIDGE_CHANNEL');
@@ -124,7 +146,7 @@ export function useExtensionBridge({
     setIsBridgeRunning(false);
     setExtensionStatus('disconnected');
     setHandshakeInfo(null);
-    logMessageRef.current('outgoing', 'DISCONNECT_HANDSHAKE', { reason: 'Bridge stopped by user' });
+    logMessageRef.current('outgoing', 'DISCONNECT_HANDSHAKE', { reason: 'Bridge stopped by user' }, 'system', 'sent');
   }, []);
 
   // Start bridge
@@ -155,12 +177,12 @@ export function useExtensionBridge({
           extensionName: 'Clockie McClockface Extension',
           version: 'v2.4.1',
           cloudProvider: 'pCloud'
-        });
+        }, 'postMessage', 'received');
       }
     }, 1200);
   }, [extensionStatus]);
 
-  // Normalizes and ingests incoming files payload without duplicate loops
+  // Process incoming files payload
   const processIncomingFilesPayload = useCallback((rawPayload: any, rawProvider?: CloudProvider) => {
     if (!rawPayload) return;
 
@@ -232,7 +254,7 @@ export function useExtensionBridge({
       provider,
       filesCount: formattedFiles.length,
       files: formattedFiles.map(f => f.path)
-    });
+    }, 'postMessage', 'received');
 
     if (onFilesLoadedRef.current) {
       onFilesLoadedRef.current(formattedFiles, provider, workspaceName);
@@ -249,6 +271,9 @@ export function useExtensionBridge({
     setIsSaving(true);
     if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
 
+    const saveStartTime = performance.now();
+    saveStartTimeRef.current[file.id] = saveStartTime;
+
     const savePayload = {
       fileId: file.id,
       id: file.id,
@@ -260,19 +285,44 @@ export function useExtensionBridge({
       timestamp: Date.now(),
     };
 
-    // Dispatch across postMessage, CustomEvent, BroadcastChannel, and localStorage
     postToExtensionRef.current('SAVE_CLOUD_FILE', savePayload);
 
-    // Fallback confirmation: If extension doesn't acknowledge within 1.5s, confirm locally
+    // Timeout safety net: If extension doesn't reply within 2.5s, log timeout warning
     saveTimeoutRef.current = window.setTimeout(() => {
       setIsSaving(false);
+      logMessageRef.current(
+        'event',
+        'SAVE_TIMEOUT_WARNING',
+        {
+          fileId: file.id,
+          path: file.path,
+          message: 'No SAVE_CLOUD_FILE_SUCCESS response received from Chrome extension within 2.5 seconds.'
+        },
+        'system',
+        'timeout'
+      );
+
       if (onFileSaveConfirmedRef.current) {
         onFileSaveConfirmedRef.current(file.id, Date.now());
       }
-    }, 1500);
+    }, 2500);
   }, []);
 
-  // Save all files to cloud
+  // Test Save Payload Trigger for Debugger
+  const testSaveRequest = useCallback(() => {
+    const sampleFile: CloudFile = {
+      id: `test-debug-${Date.now()}`,
+      name: 'debug-telemetry.ts',
+      path: 'src/debug/debug-telemetry.ts',
+      content: `// Test payload dispatched from Monarch IDE Debugger\nconsole.log("Telemetry check at ${new Date().toISOString()}");`,
+      cloudProvider: 'pCloud',
+      lastModified: new Date().toLocaleTimeString(),
+      isDirty: true,
+    };
+    saveCloudFile(sampleFile);
+  }, [saveCloudFile]);
+
+  // Save all files
   const saveAllCloudFiles = useCallback((files: CloudFile[]) => {
     setIsSaving(true);
     if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
@@ -298,7 +348,7 @@ export function useExtensionBridge({
           onFileSaveConfirmedRef.current(f.id, Date.now());
         }
       });
-    }, 1800);
+    }, 2800);
   }, []);
 
   // Preset loader
@@ -367,7 +417,7 @@ export function useExtensionBridge({
         extension: info.name,
         version: info.version,
         provider,
-      });
+      }, 'postMessage', 'acknowledged', 14);
     } else {
       stopBridge();
     }
@@ -407,12 +457,19 @@ export function useExtensionBridge({
       if (typeof BroadcastChannel !== 'undefined') {
         bc = new BroadcastChannel('CLOCKIE_MCCLOCKFACE_BRIDGE_CHANNEL');
         bc.onmessage = (event) => {
-          if (event.data?.type === 'LOAD_FILES_PAYLOAD' || event.data?.action === 'LOAD_FILES_PAYLOAD' || event.data?.file) {
+          const type = event.data?.type || event.data?.action;
+          if (type === 'LOAD_FILES_PAYLOAD' || event.data?.file) {
             processIncomingFilesPayloadRef.current(event.data.payload || event.data);
-          } else if (event.data?.type === 'SAVE_CLOUD_FILE_SUCCESS' || event.data?.action === 'SAVE_CLOUD_FILE_SUCCESS') {
+          } else if (type === 'SAVE_CLOUD_FILE_SUCCESS') {
             const fileId = event.data.fileId || event.data.payload?.fileId;
+            const startTime = saveStartTimeRef.current[fileId] || performance.now();
+            const roundtrip = Math.round(performance.now() - startTime);
+
             setIsSaving(false);
             if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
+
+            logMessageRef.current('incoming', 'SAVE_CLOUD_FILE_SUCCESS', event.data, 'BroadcastChannel', 'acknowledged', roundtrip);
+
             if (fileId && onFileSaveConfirmedRef.current) {
               onFileSaveConfirmedRef.current(fileId, Date.now());
             }
@@ -447,7 +504,11 @@ export function useExtensionBridge({
 
       if (!isKnownBridgeAction && !isKnownBridgeSource) return;
 
-      logMessageRef.current('incoming', messageType, payload || event.data);
+      const fileId = payload?.fileId || event.data?.fileId || event.data?.id;
+      const startTime = fileId ? saveStartTimeRef.current[fileId] : undefined;
+      const roundtripMs = startTime ? Math.round(performance.now() - startTime) : undefined;
+
+      logMessageRef.current('incoming', messageType, payload || event.data, 'postMessage', 'received', roundtripMs);
 
       switch (messageType) {
         case 'PING_HANDSHAKE': {
@@ -484,7 +545,7 @@ export function useExtensionBridge({
             version: extVer,
             provider,
             connectedAt: new Date().toLocaleTimeString(),
-            latencyMs: 12,
+            latencyMs: roundtripMs || 12,
           });
           break;
         }
@@ -495,7 +556,6 @@ export function useExtensionBridge({
         }
 
         case 'SAVE_CLOUD_FILE_SUCCESS': {
-          const fileId = payload?.fileId || event.data?.fileId || event.data?.id;
           const timestamp = payload?.timestamp || Date.now();
           setIsSaving(false);
           if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
@@ -506,7 +566,6 @@ export function useExtensionBridge({
         }
 
         case 'SAVE_CLOUD_FILE_ERROR': {
-          const fileId = payload?.fileId || event.data?.fileId;
           const errorMsg = payload?.error || event.data?.error || 'Failed to save to cloud provider';
           setIsSaving(false);
           if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
@@ -549,6 +608,7 @@ export function useExtensionBridge({
     stopBridge,
     saveCloudFile,
     saveAllCloudFiles,
+    testSaveRequest,
     simulateHandshake,
     simulateLoadPreset,
     clearLogs: () => setMessagesLog([]),

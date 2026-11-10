@@ -46,10 +46,15 @@ export interface ExtensionHandshakeInfo {
 
 export interface BridgeMessage {
   id: string;
-  direction: 'incoming' | 'outgoing';
+  direction: 'incoming' | 'outgoing' | 'event';
   type: string;
+  channel?: 'postMessage' | 'BroadcastChannel' | 'CustomEvent' | 'localStorage' | 'system';
   payload: any;
+  response?: any;
+  status?: 'sent' | 'received' | 'acknowledged' | 'error' | 'timeout';
+  roundtripMs?: number;
   timestamp: number;
+  formattedTime: string;
 }
 
 export type EditorTheme = 'freshfood-dark' | 'freshfood-cyber' | 'freshfood-light' | 'vs-dark' | 'vs' | 'hc-black';
