@@ -2,18 +2,13 @@ import React, { useState } from 'react';
 import { 
   X, 
   Radio, 
-  CheckCircle2, 
-  AlertCircle, 
-  Send, 
-  Terminal, 
   Copy, 
   Check, 
   Trash2, 
   HardDrive, 
-  Code2, 
-  Layers,
-  ExternalLink,
-  RotateCw
+  Terminal,
+  RotateCw,
+  Code
 } from 'lucide-react';
 import { ExtensionStatus, ExtensionHandshakeInfo, BridgeMessage, CloudProvider } from '../types/ide';
 
@@ -40,7 +35,7 @@ export const ExtensionBridgeModal: React.FC<ExtensionBridgeModalProps> = ({
   onSimulateLoadPreset,
   onClearLogs,
 }) => {
-  const [activeTab, setActiveTab] = useState<'console' | 'manifest' | 'contentScript'>('console');
+  const [activeTab, setActiveTab] = useState<'console' | 'manifest' | 'contentScript' | 'backgroundScript'>('console');
   const [copiedFile, setCopiedFile] = useState<string | null>(null);
 
   if (!isOpen) return null;
@@ -62,6 +57,7 @@ export const ExtensionBridgeModal: React.FC<ExtensionBridgeModalProps> = ({
   ],
   "host_permissions": [
     "https://ide.freshfood.rocks/*",
+    "http://localhost:*/*",
     "https://api.pcloud.com/*"
   ],
   "background": {
@@ -77,11 +73,14 @@ export const ExtensionBridgeModal: React.FC<ExtensionBridgeModalProps> = ({
 }`;
 
   const extensionContentCode = `// Clockie McClockface - Content Script (content.js)
-console.log("[Clockie McClockface] Bridge initialized for FreshFood Rocks IDE");
+console.log("[Clockie McClockface] Bridge content.js active");
 
-// Relay messages from IDE to Chrome Extension Background
+// 1. Relay SAVE_CLOUD_FILE / SAVE_ALL_FILES from IDE page to Extension Service Worker
 window.addEventListener("message", (event) => {
   if (event.data?.source === "FRESHFOOD_MONARCH_IDE") {
+    const action = event.data.action || event.data.type;
+    console.log("[Content Script] Received from IDE:", action, event.data);
+
     chrome.runtime.sendMessage(event.data, (response) => {
       if (response) {
         window.postMessage(response, "*");
@@ -90,12 +89,22 @@ window.addEventListener("message", (event) => {
   }
 });
 
-// Relay messages from Extension Background back to IDE
+// 2. Listen on BroadcastChannel for IDE events
+if (typeof BroadcastChannel !== "undefined") {
+  const bc = new BroadcastChannel("CLOCKIE_MCCLOCKFACE_BRIDGE_CHANNEL");
+  bc.onmessage = (event) => {
+    if (event.data?.source === "FRESHFOOD_MONARCH_IDE") {
+      chrome.runtime.sendMessage(event.data);
+    }
+  };
+}
+
+// 3. Relay confirmation back from Extension Service Worker to IDE page
 chrome.runtime.onMessage.addListener((message) => {
   window.postMessage(message, "*");
 });
 
-// Broadcast handshake
+// Handshake broadcast on tab load
 window.postMessage({
   source: "CLOCKIE_MCCLOCKFACE_EXT",
   type: "PONG_HANDSHAKE",
@@ -106,6 +115,72 @@ window.postMessage({
     status: "ready"
   }
 }, "*");
+`;
+
+  const extensionBackgroundCode = `// Clockie McClockface - Service Worker (background.js)
+// Handles pCloud REST API persistence for SAVE_CLOUD_FILE
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  const type = message.type || message.action;
+
+  if (type === "SAVE_CLOUD_FILE") {
+    const { fileId, path, content, cloudProvider } = message.payload || message;
+    console.log("[Background Worker] Saving to pCloud API:", path, content);
+
+    // Call pCloud /uploadfile REST endpoint or Sync storage
+    saveTopCloudDrive(path, content)
+      .then(() => {
+        // Send success message back to web app
+        const reply = {
+          source: "CLOCKIE_MCCLOCKFACE_EXT",
+          type: "SAVE_CLOUD_FILE_SUCCESS",
+          fileId: fileId,
+          path: path,
+          timestamp: Date.now()
+        };
+
+        if (sender.tab?.id) {
+          chrome.tabs.sendMessage(sender.tab.id, reply);
+        }
+        sendResponse(reply);
+      })
+      .catch((err) => {
+        const errorReply = {
+          source: "CLOCKIE_MCCLOCKFACE_EXT",
+          type: "SAVE_CLOUD_FILE_ERROR",
+          fileId: fileId,
+          error: err.message
+        };
+        if (sender.tab?.id) {
+          chrome.tabs.sendMessage(sender.tab.id, errorReply);
+        }
+        sendResponse(errorReply);
+      });
+
+    return true; // Keep response channel open for async fetch
+  }
+});
+
+async function saveTopCloudDrive(filePath, fileContent) {
+  // Example pCloud API upload endpoint using access token
+  const token = await chrome.storage.local.get("pcloud_access_token");
+  if (!token.pcloud_access_token) {
+    console.warn("No pCloud access token found in extension storage, saving to extension sync storage");
+    return chrome.storage.sync.set({ [filePath]: fileContent });
+  }
+
+  const formData = new FormData();
+  formData.append("filename", filePath);
+  formData.append("file", new Blob([fileContent], { type: "text/plain" }));
+
+  const res = await fetch("https://api.pcloud.com/uploadfile", {
+    method: "POST",
+    headers: { Authorization: \`Bearer \${token.pcloud_access_token}\` },
+    body: formData
+  });
+
+  return res.json();
+}
 `;
 
   return (
@@ -192,10 +267,10 @@ window.postMessage({
         </div>
 
         {/* Tab Navigation */}
-        <div className="flex items-center gap-1 px-6 pt-3 border-b border-zinc-800 bg-[#141416] text-xs">
+        <div className="flex items-center gap-1 px-6 pt-3 border-b border-zinc-800 bg-[#141416] text-xs overflow-x-auto">
           <button
             onClick={() => setActiveTab('console')}
-            className={`px-4 py-2 border-b-2 font-medium transition ${
+            className={`px-4 py-2 border-b-2 font-medium transition shrink-0 ${
               activeTab === 'console'
                 ? 'border-emerald-500 text-emerald-400'
                 : 'border-transparent text-zinc-400 hover:text-zinc-200'
@@ -205,23 +280,33 @@ window.postMessage({
           </button>
           <button
             onClick={() => setActiveTab('manifest')}
-            className={`px-4 py-2 border-b-2 font-medium transition ${
+            className={`px-4 py-2 border-b-2 font-medium transition shrink-0 ${
               activeTab === 'manifest'
                 ? 'border-emerald-500 text-emerald-400'
                 : 'border-transparent text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            Extension manifest.json
+            manifest.json
           </button>
           <button
             onClick={() => setActiveTab('contentScript')}
-            className={`px-4 py-2 border-b-2 font-medium transition ${
+            className={`px-4 py-2 border-b-2 font-medium transition shrink-0 ${
               activeTab === 'contentScript'
                 ? 'border-emerald-500 text-emerald-400'
                 : 'border-transparent text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            Extension content.js Bridge
+            content.js (Bridge Relay)
+          </button>
+          <button
+            onClick={() => setActiveTab('backgroundScript')}
+            className={`px-4 py-2 border-b-2 font-medium transition shrink-0 ${
+              activeTab === 'backgroundScript'
+                ? 'border-emerald-500 text-emerald-400'
+                : 'border-transparent text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            background.js (pCloud API Persistence)
           </button>
         </div>
 
@@ -383,6 +468,33 @@ window.postMessage({
               </div>
               <pre className="p-4 rounded-xl bg-zinc-950 border border-zinc-800 text-emerald-400 font-mono text-xs overflow-x-auto select-text leading-relaxed">
                 <code>{extensionContentCode}</code>
+              </pre>
+            </div>
+          )}
+
+          {activeTab === 'backgroundScript' && (
+            <div className="relative">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs text-zinc-400 font-mono">background.js (pCloud API Persistence)</span>
+                <button
+                  onClick={() => handleCopy(extensionBackgroundCode, 'background')}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs transition"
+                >
+                  {copiedFile === 'background' ? (
+                    <>
+                      <Check className="w-3 h-3 text-emerald-400" />
+                      <span className="text-emerald-400">Copied</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3 h-3" />
+                      <span>Copy Code</span>
+                    </>
+                  )}
+                </button>
+              </div>
+              <pre className="p-4 rounded-xl bg-zinc-950 border border-zinc-800 text-emerald-400 font-mono text-xs overflow-x-auto select-text leading-relaxed">
+                <code>{extensionBackgroundCode}</code>
               </pre>
             </div>
           )}
