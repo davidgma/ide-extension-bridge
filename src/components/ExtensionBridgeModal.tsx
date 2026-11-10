@@ -46,18 +46,22 @@ export const ExtensionBridgeModal: React.FC<ExtensionBridgeModalProps> = ({
     setTimeout(() => setCopiedFile(null), 2000);
   };
 
+  const currentOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://ide.freshfood.rocks';
+
   const extensionManifestCode = `{
   "manifest_version": 3,
   "name": "Clockie McClockface - FreshFood Cloud IDE Bridge",
   "version": "2.4.1",
-  "description": "Bi-directional cloud drive sync bridge for https://ide.freshfood.rocks",
+  "description": "Bi-directional cloud drive sync bridge for ${currentOrigin}",
   "permissions": [
     "storage",
     "activeTab"
   ],
   "host_permissions": [
+    "${currentOrigin}/*",
     "https://ide.freshfood.rocks/*",
     "http://localhost:*/*",
+    "http://127.0.0.1:*/*",
     "https://api.pcloud.com/*"
   ],
   "background": {
@@ -65,7 +69,12 @@ export const ExtensionBridgeModal: React.FC<ExtensionBridgeModalProps> = ({
   },
   "content_scripts": [
     {
-      "matches": ["https://ide.freshfood.rocks/*", "http://localhost:*/*"],
+      "matches": [
+        "${currentOrigin}/*",
+        "https://ide.freshfood.rocks/*",
+        "http://localhost:*/*",
+        "http://127.0.0.1:*/*"
+      ],
       "js": ["content.js"],
       "run_at": "document_start"
     }

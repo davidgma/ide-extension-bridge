@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { CloudFile, CloudProvider, ExtensionStatus, ExtensionHandshakeInfo, BridgeMessage } from '../types/ide';
+import { CloudFile, CloudProvider, ExtensionStatus, ExtensionHandshakeInfo, BridgeMessage, DispatchTargetInfo } from '../types/ide';
 
 interface UseExtensionBridgeProps {
   onFilesLoaded?: (files: CloudFile[], provider?: CloudProvider, workspaceName?: string) => void;
@@ -42,6 +42,28 @@ export function useExtensionBridge({
     onFileSaveErrorRef.current = onFileSaveError;
   }, [onFileSaveError]);
 
+  const getDispatchInfo = useCallback((): DispatchTargetInfo => {
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://ide.freshfood.rocks';
+    const url = typeof window !== 'undefined' ? window.location.href : 'https://ide.freshfood.rocks/';
+    const host = typeof window !== 'undefined' ? window.location.host : 'ide.freshfood.rocks';
+    const protocol = typeof window !== 'undefined' ? window.location.protocol : 'https:';
+    const port = typeof window !== 'undefined' ? (window.location.port || (protocol === 'https:' ? '443' : '80')) : '443';
+    const chromeRuntimeAvailable = Boolean(typeof window !== 'undefined' && (window as any).chrome?.runtime?.sendMessage);
+
+    return {
+      url,
+      origin,
+      host,
+      protocol,
+      port,
+      postMessageTarget: `window.postMessage(envelope, '*') on origin '${origin}'`,
+      broadcastChannelName: 'CLOCKIE_MCCLOCKFACE_BRIDGE_CHANNEL',
+      customEventNames: ['SAVE_CLOUD_FILE', 'FRESHFOOD_MONARCH_SAVE', 'FRESHFOOD_MONARCH_IDE_EVENT'],
+      localStorageKey: 'FRESHFOOD_SAVE_REQUEST',
+      chromeRuntimeAvailable,
+    };
+  }, []);
+
   // High precision log message helper
   const logMessage = useCallback((
     direction: 'incoming' | 'outgoing' | 'event',
@@ -50,10 +72,12 @@ export function useExtensionBridge({
     channel: 'postMessage' | 'BroadcastChannel' | 'CustomEvent' | 'localStorage' | 'system' = 'postMessage',
     status: 'sent' | 'received' | 'acknowledged' | 'error' | 'timeout' = 'sent',
     roundtripMs?: number,
-    response?: any
+    response?: any,
+    overrideDispatchInfo?: DispatchTargetInfo
   ) => {
     const now = new Date();
     const formattedTime = `${now.toLocaleTimeString([], { hour12: false })}.${String(now.getMilliseconds()).padStart(3, '0')}`;
+    const dispatchInfo = overrideDispatchInfo || getDispatchInfo();
 
     const entry: BridgeMessage = {
       id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
@@ -66,11 +90,12 @@ export function useExtensionBridge({
       roundtripMs,
       timestamp: Date.now(),
       formattedTime,
+      dispatchInfo,
     };
 
     setMessagesLog(prev => [entry, ...prev.slice(0, 99)]); // Capped at 100 entries
     return entry;
-  }, []);
+  }, [getDispatchInfo]);
 
   const logMessageRef = useRef(logMessage);
   useEffect(() => {
@@ -83,6 +108,8 @@ export function useExtensionBridge({
     payload: any = {},
     channelTarget: 'postMessage' | 'BroadcastChannel' | 'CustomEvent' | 'localStorage' = 'postMessage'
   ) => {
+    const dispatchInfo = getDispatchInfo();
+
     const messageEnvelope = {
       source: 'FRESHFOOD_MONARCH_IDE',
       type,
@@ -92,6 +119,7 @@ export function useExtensionBridge({
       path: payload?.path,
       content: payload?.content,
       cloudProvider: payload?.cloudProvider,
+      dispatchTarget: dispatchInfo,
       payload: {
         ...payload,
         timestamp: Date.now(),
@@ -99,12 +127,12 @@ export function useExtensionBridge({
       timestamp: Date.now(),
     };
 
-    logMessageRef.current('outgoing', type, messageEnvelope, channelTarget, 'sent');
+    logMessageRef.current('outgoing', type, messageEnvelope, channelTarget, 'sent', undefined, undefined, dispatchInfo);
 
-    // 1. window.postMessage
+    // 1. window.postMessage (Standard for web page -> extension content scripts)
     window.postMessage(messageEnvelope, '*');
 
-    // 2. CustomEvent
+    // 2. CustomEvent dispatch on window DOM node
     try {
       window.dispatchEvent(new CustomEvent(type, { detail: messageEnvelope }));
       window.dispatchEvent(new CustomEvent('FRESHFOOD_MONARCH_SAVE', { detail: messageEnvelope }));
@@ -112,7 +140,7 @@ export function useExtensionBridge({
       // Ignored
     }
 
-    // 3. BroadcastChannel
+    // 3. BroadcastChannel (Same-origin tab / frame relay)
     try {
       if (typeof BroadcastChannel !== 'undefined') {
         const bc = new BroadcastChannel('CLOCKIE_MCCLOCKFACE_BRIDGE_CHANNEL');
@@ -131,7 +159,20 @@ export function useExtensionBridge({
     } catch {
       // Ignored
     }
-  }, []);
+
+    // 5. Direct chrome.runtime.sendMessage if extension script is running in same context
+    try {
+      if (typeof window !== 'undefined' && (window as any).chrome?.runtime?.sendMessage) {
+        (window as any).chrome.runtime.sendMessage(messageEnvelope, (reply: any) => {
+          if (reply) {
+            logMessageRef.current('incoming', `${type}_DIRECT_ACK`, reply, 'system', 'acknowledged');
+          }
+        });
+      }
+    } catch {
+      // Ignored
+    }
+  }, [getDispatchInfo]);
 
   const postToExtensionRef = useRef(postToExtension);
   useEffect(() => {

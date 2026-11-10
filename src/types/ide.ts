@@ -44,6 +44,19 @@ export interface ExtensionHandshakeInfo {
   latencyMs?: number;
 }
 
+export interface DispatchTargetInfo {
+  url: string;
+  origin: string;
+  host: string;
+  protocol: string;
+  port: string;
+  postMessageTarget: string;
+  broadcastChannelName: string;
+  customEventNames: string[];
+  localStorageKey?: string;
+  chromeRuntimeAvailable: boolean;
+}
+
 export interface BridgeMessage {
   id: string;
   direction: 'incoming' | 'outgoing' | 'event';
@@ -55,6 +68,7 @@ export interface BridgeMessage {
   roundtripMs?: number;
   timestamp: number;
   formattedTime: string;
+  dispatchInfo?: DispatchTargetInfo;
 }
 
 export type EditorTheme = 'freshfood-dark' | 'freshfood-cyber' | 'freshfood-light' | 'vs-dark' | 'vs' | 'hc-black';
