@@ -78,16 +78,34 @@ export default function App() {
     clearLogs,
   } = useExtensionBridge({
     onFilesLoaded: (incomingFiles, provider, newWorkspaceName) => {
-      setFiles(incomingFiles);
+      if (incomingFiles.length === 0) return;
+
+      setFiles(prevFiles => {
+        const updated = [...prevFiles];
+        for (const inc of incomingFiles) {
+          const existingIdx = updated.findIndex(f => f.path === inc.path || f.id === inc.id);
+          if (existingIdx >= 0) {
+            updated[existingIdx] = { ...updated[existingIdx], ...inc };
+          } else {
+            updated.push(inc);
+          }
+        }
+        return updated;
+      });
+
       if (provider) setCloudProvider(provider);
       if (newWorkspaceName) setWorkspaceName(newWorkspaceName);
-      
-      if (incomingFiles.length > 0) {
-        const first = incomingFiles[0];
-        setOpenTabs([{ fileId: first.id, path: first.path, title: first.name, previewMode: 'split' }]);
-        setActiveTabId(first.id);
-      }
-      notify(`Loaded ${incomingFiles.length} files from ${provider || 'Cloud Extension'}`);
+
+      // Open and focus the received file (or first file in batch)
+      const primaryFile = incomingFiles[0];
+      setOpenTabs(prevTabs => {
+        const exists = prevTabs.some(t => t.fileId === primaryFile.id || t.path === primaryFile.path);
+        if (exists) return prevTabs;
+        return [...prevTabs, { fileId: primaryFile.id, path: primaryFile.path, title: primaryFile.name, previewMode: 'split' }];
+      });
+      setActiveTabId(primaryFile.id);
+
+      notify(`Received ${primaryFile.name} from ${provider || 'Chrome Extension'}`);
     },
     onFileSaveConfirmed: (fileId, timestamp) => {
       setFiles(prev =>

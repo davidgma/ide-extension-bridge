@@ -12,7 +12,6 @@ export function useExtensionBridge({
   onFileSaveConfirmed,
   onFileSaveError,
 }: UseExtensionBridgeProps = {}) {
-  // Idle by default: The site does nothing until manually started by user
   const [extensionStatus, setExtensionStatus] = useState<ExtensionStatus>('disconnected');
   const [handshakeInfo, setHandshakeInfo] = useState<ExtensionHandshakeInfo | null>(null);
   const [messagesLog, setMessagesLog] = useState<BridgeMessage[]>([]);
@@ -21,6 +20,11 @@ export function useExtensionBridge({
 
   const pingTimeoutRef = useRef<number | null>(null);
   const isRunningRef = useRef(false);
+  const onFilesLoadedRef = useRef(onFilesLoaded);
+
+  useEffect(() => {
+    onFilesLoadedRef.current = onFilesLoaded;
+  }, [onFilesLoaded]);
 
   // Helper to record messages in the log
   const logMessage = useCallback((direction: 'incoming' | 'outgoing', type: string, payload: any) => {
@@ -31,7 +35,7 @@ export function useExtensionBridge({
       payload,
       timestamp: Date.now(),
     };
-    setMessagesLog(prev => [entry, ...prev.slice(0, 49)]); // keep last 50
+    setMessagesLog(prev => [entry, ...prev.slice(0, 49)]);
     return entry;
   }, []);
 
@@ -49,7 +53,7 @@ export function useExtensionBridge({
     );
   }, [logMessage]);
 
-  // Manually stop the bridge
+  // Stop bridge
   const stopBridge = useCallback(() => {
     if (pingTimeoutRef.current) {
       window.clearTimeout(pingTimeoutRef.current);
@@ -62,7 +66,7 @@ export function useExtensionBridge({
     logMessage('outgoing', 'DISCONNECT_HANDSHAKE', { reason: 'Bridge manually stopped by user' });
   }, [logMessage]);
 
-  // Manually start the bridge
+  // Start bridge
   const startBridge = useCallback(() => {
     if (pingTimeoutRef.current) {
       window.clearTimeout(pingTimeoutRef.current);
@@ -77,10 +81,8 @@ export function useExtensionBridge({
       timestamp: Date.now(),
     });
 
-    // Timeout: if no real extension answers within 2.5s, fallback to connected simulation
-    // so user can test the workspace seamlessly, or stop
     pingTimeoutRef.current = window.setTimeout(() => {
-      if (isRunningRef.current) {
+      if (isRunningRef.current && extensionStatus !== 'connected') {
         setExtensionStatus('connected');
         setHandshakeInfo({
           name: 'Clockie McClockface Extension',
@@ -97,9 +99,83 @@ export function useExtensionBridge({
         });
       }
     }, 1500);
-  }, [postToExtension, logMessage]);
+  }, [postToExtension, logMessage, extensionStatus]);
 
-  // Save single file to cloud
+  // Normalizes incoming raw payload into structured CloudFile array
+  const processIncomingFilesPayload = useCallback((rawPayload: any, rawProvider?: CloudProvider) => {
+    let filesData: any[] = [];
+    let provider: CloudProvider = rawProvider || 'pCloud';
+    let workspaceName = 'Cloud Extension Drive';
+
+    if (!rawPayload) return;
+
+    if (typeof rawPayload === 'string') {
+      try {
+        rawPayload = JSON.parse(rawPayload);
+      } catch {
+        // Plain text file sent directly
+        rawPayload = { name: 'extension-file.txt', path: 'extension-file.txt', content: rawPayload };
+      }
+    }
+
+    if (Array.isArray(rawPayload)) {
+      filesData = rawPayload;
+    } else if (rawPayload.files && Array.isArray(rawPayload.files)) {
+      filesData = rawPayload.files;
+      provider = rawPayload.cloudProvider || rawPayload.provider || provider;
+      workspaceName = rawPayload.workspaceName || workspaceName;
+    } else if (rawPayload.fileList && Array.isArray(rawPayload.fileList)) {
+      filesData = rawPayload.fileList;
+      provider = rawPayload.cloudProvider || rawPayload.provider || provider;
+      workspaceName = rawPayload.workspaceName || workspaceName;
+    } else if (rawPayload.file && typeof rawPayload.file === 'object') {
+      filesData = [rawPayload.file];
+      provider = rawPayload.cloudProvider || rawPayload.provider || provider;
+    } else if (rawPayload.name || rawPayload.path || rawPayload.content) {
+      filesData = [rawPayload];
+      provider = rawPayload.cloudProvider || rawPayload.provider || provider;
+    }
+
+    if (filesData.length === 0) return;
+
+    const formattedFiles: CloudFile[] = filesData.map((item, idx) => ({
+      id: item.id || `ext-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 5)}`,
+      name: item.name || item.filename || item.path?.split('/').pop() || `file-${idx}.txt`,
+      path: item.path || item.filename || item.name || `file-${idx}.txt`,
+      content: typeof item.content === 'string' ? item.content : typeof item.data === 'string' ? item.data : JSON.stringify(item.content || item.data || '', null, 2),
+      isDirectory: Boolean(item.isDirectory),
+      parentId: item.parentId || item.parentFolderId,
+      cloudProvider: item.cloudProvider || provider,
+      mimeType: item.mimeType,
+      size: item.size,
+      lastModified: item.lastModified || new Date().toLocaleTimeString(),
+      isDirty: false,
+    }));
+
+    // Activate bridge and update connection status
+    isRunningRef.current = true;
+    setIsBridgeRunning(true);
+    setExtensionStatus('connected');
+    setHandshakeInfo({
+      name: 'Clockie McClockface Extension',
+      version: 'v2.4.1',
+      provider,
+      connectedAt: new Date().toLocaleTimeString(),
+      latencyMs: 5,
+    });
+
+    logMessage('incoming', 'LOAD_FILES_PAYLOAD', {
+      provider,
+      filesCount: formattedFiles.length,
+      files: formattedFiles.map(f => f.path)
+    });
+
+    if (onFilesLoadedRef.current) {
+      onFilesLoadedRef.current(formattedFiles, provider, workspaceName);
+    }
+  }, [logMessage]);
+
+  // Save single file
   const saveCloudFile = useCallback((file: CloudFile) => {
     setIsSaving(true);
     postToExtension('SAVE_CLOUD_FILE', {
@@ -119,7 +195,7 @@ export function useExtensionBridge({
     }, 250);
   }, [postToExtension, onFileSaveConfirmed]);
 
-  // Save all files batch to cloud
+  // Save all files
   const saveAllCloudFiles = useCallback((files: CloudFile[]) => {
     setIsSaving(true);
     postToExtension('SAVE_ALL_FILES', {
@@ -142,32 +218,7 @@ export function useExtensionBridge({
     }, 350);
   }, [postToExtension, onFileSaveConfirmed]);
 
-  // Simulation mode helper
-  const simulateHandshake = useCallback((connected = true, provider: CloudProvider = 'pCloud') => {
-    if (connected) {
-      isRunningRef.current = true;
-      setIsBridgeRunning(true);
-      const info: ExtensionHandshakeInfo = {
-        name: 'Clockie McClockface Extension',
-        version: 'v2.4.1 (Monarch Cloud Sync)',
-        provider,
-        connectedAt: new Date().toLocaleTimeString(),
-        latencyMs: 14,
-      };
-      setExtensionStatus('connected');
-      setHandshakeInfo(info);
-      logMessage('incoming', 'PONG_HANDSHAKE', {
-        status: 'OK',
-        extension: info.name,
-        version: info.version,
-        provider,
-      });
-    } else {
-      stopBridge();
-    }
-  }, [logMessage, stopBridge]);
-
-  // Preset loader
+  // Preset simulation loader
   const simulateLoadPreset = useCallback((preset: 'pcloud' | 'gdrive' | 'dropbox') => {
     let providerName: CloudProvider = 'pCloud';
     let sampleFiles: CloudFile[] = [];
@@ -209,22 +260,78 @@ export function useExtensionBridge({
       ];
     }
 
-    if (onFilesLoaded && sampleFiles.length > 0) {
-      onFilesLoaded(sampleFiles, providerName, `${providerName} Remote Vault`);
-      simulateHandshake(true, providerName);
-      logMessage('incoming', 'LOAD_FILES_PAYLOAD', {
-        provider: providerName,
-        filesCount: sampleFiles.length,
-        files: sampleFiles.map(f => f.path)
-      });
+    if (sampleFiles.length > 0) {
+      processIncomingFilesPayload(sampleFiles, providerName);
     }
-  }, [onFilesLoaded, simulateHandshake, logMessage]);
+  }, [processIncomingFilesPayload]);
 
-  // Only listen to window postMessages when bridge is actively running
+  // Simulation mode helper
+  const simulateHandshake = useCallback((connected = true, provider: CloudProvider = 'pCloud') => {
+    if (connected) {
+      isRunningRef.current = true;
+      setIsBridgeRunning(true);
+      const info: ExtensionHandshakeInfo = {
+        name: 'Clockie McClockface Extension',
+        version: 'v2.4.1 (Monarch Cloud Sync)',
+        provider,
+        connectedAt: new Date().toLocaleTimeString(),
+        latencyMs: 14,
+      };
+      setExtensionStatus('connected');
+      setHandshakeInfo(info);
+      logMessage('incoming', 'PONG_HANDSHAKE', {
+        status: 'OK',
+        extension: info.name,
+        version: info.version,
+        provider,
+      });
+    } else {
+      stopBridge();
+    }
+  }, [logMessage, stopBridge]);
+
+  // Check URL parameters, Hash fragment, and localStorage/BroadcastChannel on boot for incoming file payloads
   useEffect(() => {
-    if (!isBridgeRunning) return;
+    // 1. Check URL Query Parameters or Hash
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const hashParams = new URLSearchParams(window.location.hash.replace('#', '?'));
 
-    const handleMessage = (event: MessageEvent) => {
+      const payloadStr = params.get('payload') || params.get('file') || params.get('data') ||
+                         hashParams.get('payload') || hashParams.get('file') || hashParams.get('data');
+
+      if (payloadStr) {
+        processIncomingFilesPayload(payloadStr);
+      }
+
+      // 2. Check localStorage for pending extension payload
+      const storedPayload = localStorage.getItem('FRESHFOOD_PENDING_FILE') || localStorage.getItem('CLOCKIE_PENDING_PAYLOAD');
+      if (storedPayload) {
+        localStorage.removeItem('FRESHFOOD_PENDING_FILE');
+        localStorage.removeItem('CLOCKIE_PENDING_PAYLOAD');
+        processIncomingFilesPayload(storedPayload);
+      }
+    } catch (e) {
+      console.warn('Error inspecting boot URL/storage payload:', e);
+    }
+
+    // 3. Listen on BroadcastChannel for multi-tab or extension background broadcasts
+    let bc: BroadcastChannel | null = null;
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        bc = new BroadcastChannel('CLOCKIE_MCCLOCKFACE_BRIDGE_CHANNEL');
+        bc.onmessage = (event) => {
+          if (event.data?.type === 'LOAD_FILES_PAYLOAD' || event.data?.action === 'LOAD_FILES_PAYLOAD' || event.data?.file) {
+            processIncomingFilesPayload(event.data.payload || event.data);
+          }
+        };
+      }
+    } catch {
+      // BroadcastChannel not available in all contexts
+    }
+
+    // 4. Global window message listener (Active at all times so incoming extension events are NEVER missed!)
+    const handleGlobalMessage = (event: MessageEvent) => {
       if (!event.data || typeof event.data !== 'object') return;
       if (event.data.source === 'FRESHFOOD_MONARCH_IDE') return;
 
@@ -237,13 +344,14 @@ export function useExtensionBridge({
         'PING_HANDSHAKE',
         'PONG_HANDSHAKE',
         'LOAD_FILES_PAYLOAD',
+        'SAVE_CLOUD_FILE',
         'SAVE_CLOUD_FILE_SUCCESS',
         'SAVE_CLOUD_FILE_ERROR',
         'DISCONNECT_HANDSHAKE'
       ];
 
       const isKnownBridgeAction = VALID_BRIDGE_ACTIONS.includes(messageType);
-      const isKnownBridgeSource = event.data.source === 'CLOCKIE_MCCLOCKFACE_EXT';
+      const isKnownBridgeSource = event.data.source === 'CLOCKIE_MCCLOCKFACE_EXT' || event.data.extensionId;
 
       if (!isKnownBridgeAction && !isKnownBridgeSource) return;
 
@@ -251,6 +359,8 @@ export function useExtensionBridge({
 
       switch (messageType) {
         case 'PING_HANDSHAKE': {
+          isRunningRef.current = true;
+          setIsBridgeRunning(true);
           setExtensionStatus('connected');
           const extName = payload?.extensionName || 'Clockie McClockface Extension';
           const extVer = payload?.version || 'v2.4.1';
@@ -271,6 +381,8 @@ export function useExtensionBridge({
         }
 
         case 'PONG_HANDSHAKE': {
+          isRunningRef.current = true;
+          setIsBridgeRunning(true);
           setExtensionStatus('connected');
           const extName = payload?.extensionName || payload?.name || 'Clockie McClockface Extension';
           const extVer = payload?.version || 'v2.4.1';
@@ -286,27 +398,7 @@ export function useExtensionBridge({
         }
 
         case 'LOAD_FILES_PAYLOAD': {
-          const filesData: any[] = payload?.files || payload?.fileList || [];
-          const provider: CloudProvider = payload?.cloudProvider || payload?.provider || 'pCloud';
-          const workspaceName: string = payload?.workspaceName || 'Cloud Drive Workspace';
-
-          const formattedFiles: CloudFile[] = filesData.map((item, idx) => ({
-            id: item.id || `ext-${Date.now()}-${idx}`,
-            name: item.name || item.path?.split('/').pop() || `file-${idx}`,
-            path: item.path || item.name || `file-${idx}`,
-            content: typeof item.content === 'string' ? item.content : JSON.stringify(item.content, null, 2),
-            isDirectory: Boolean(item.isDirectory),
-            parentId: item.parentId || item.parentFolderId,
-            cloudProvider: provider,
-            mimeType: item.mimeType,
-            size: item.size,
-            lastModified: item.lastModified || new Date().toLocaleString(),
-            isDirty: false,
-          }));
-
-          if (onFilesLoaded && formattedFiles.length > 0) {
-            onFilesLoaded(formattedFiles, provider, workspaceName);
-          }
+          processIncomingFilesPayload(payload || event.data);
           break;
         }
 
@@ -343,14 +435,16 @@ export function useExtensionBridge({
       }
     };
 
-    window.addEventListener('message', handleMessage);
+    window.addEventListener('message', handleGlobalMessage);
+
     return () => {
-      window.removeEventListener('message', handleMessage);
+      window.removeEventListener('message', handleGlobalMessage);
+      if (bc) bc.close();
       if (pingTimeoutRef.current) {
         window.clearTimeout(pingTimeoutRef.current);
       }
     };
-  }, [isBridgeRunning, logMessage, postToExtension, onFilesLoaded, onFileSaveConfirmed, onFileSaveError]);
+  }, [logMessage, postToExtension, processIncomingFilesPayload, onFileSaveConfirmed, onFileSaveError]);
 
   return {
     extensionStatus,
