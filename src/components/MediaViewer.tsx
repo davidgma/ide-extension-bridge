@@ -170,13 +170,13 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({ file }) => {
   // Video File Rendering
   if (isVideo) {
     return (
-      <div className="h-full w-full flex flex-col bg-[#141416] select-none">
+      <div className="h-full w-full flex flex-col bg-[#141416] select-auto">
         {/* Toolbar */}
         <div className="flex items-center justify-between px-4 py-2 bg-zinc-900 border-b border-zinc-800 text-xs text-zinc-300">
           <div className="flex items-center gap-2">
             <Film className="w-4 h-4 text-emerald-400" />
             <span className="font-semibold text-white">{file.name}</span>
-            <span className="px-2 py-0.5 rounded bg-zinc-800 text-[10px] uppercase font-mono text-emerald-400">
+            <span className="px-2 py-0.5 rounded bg-zinc-800 text-[10px] normal-case font-mono text-emerald-400">
               {ext}
             </span>
           </div>
@@ -264,13 +264,13 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({ file }) => {
 
   // Image File Rendering
   return (
-    <div className="h-full w-full flex flex-col bg-[#141416] select-none">
+    <div className="h-full w-full flex flex-col bg-[#141416] select-auto">
       {/* Top Toolbar */}
       <div className="flex items-center justify-between px-4 py-2 bg-zinc-900 border-b border-zinc-800 text-xs text-zinc-300">
         <div className="flex items-center gap-2">
           <ImageIcon className="w-4 h-4 text-emerald-400" />
           <span className="font-semibold text-white">{file.name}</span>
-          <span className="px-2 py-0.5 rounded bg-zinc-800 text-[10px] uppercase font-mono text-emerald-400">
+          <span className="px-2 py-0.5 rounded bg-zinc-800 text-[10px] font-mono text-emerald-400">
             {ext}
           </span>
           {imgDimensions && (

@@ -388,7 +388,7 @@ export default function App() {
   }, [handleSaveCurrent]);
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-[#18181b] text-zinc-200 select-none overflow-hidden">
+    <div className="h-screen w-screen flex flex-col bg-[#18181b] text-zinc-200 select-auto overflow-hidden">
       {/* Top Header */}
       <Header
         activeFile={activeFile}

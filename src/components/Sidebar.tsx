@@ -125,7 +125,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       if (isFolder) {
         return (
-          <div key={node.path} className="select-none">
+          <div key={node.path} className="select-auto">
             <div
               onClick={() => toggleFolder(node.path)}
               style={{ paddingLeft: `${depth * 14 + 10}px` }}
@@ -231,7 +231,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   return (
-    <aside className="w-64 h-full bg-[#1b1b1e] border-r border-zinc-800 flex flex-col select-none shrink-0">
+    <aside className="w-64 h-full bg-[#1b1b1e] border-r border-zinc-800 flex flex-col select-auto shrink-0">
       {/* Workspace Cloud Header */}
       <div className="p-3 border-b border-zinc-800/80 bg-zinc-900/40">
         <div className="flex items-center justify-between">
@@ -241,14 +241,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
               {workspaceName}
             </span>
           </div>
-          <span className="px-1.5 py-0.2 rounded text-[10px] font-mono uppercase bg-emerald-950 text-emerald-400 border border-emerald-500/30">
+          <span className="px-1.5 py-0.2 rounded text-[10px] font-mono normal-case bg-emerald-950 text-emerald-400 border border-emerald-500/30">
             {cloudProvider}
           </span>
         </div>
 
         {/* Toolbar: New File, New Folder, Upload, Download */}
         <div className="flex items-center justify-between mt-2 pt-2 border-t border-zinc-800/60 text-zinc-400">
-          <span className="text-[10px] uppercase font-bold tracking-wider text-zinc-400">
+          <span className="text-[10px] normal-case font-bold tracking-wider text-zinc-400">
             Files ({files.length})
           </span>
           <div className="flex items-center gap-1">

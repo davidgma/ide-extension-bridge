@@ -44,7 +44,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   const language = activeFile ? getMonacoLanguage(activeFile.name) : 'plaintext';
 
   return (
-    <footer className="h-6 bg-[#18181b] border-t border-zinc-800 flex items-center justify-between px-3 text-[11px] select-none text-zinc-400 font-mono z-20">
+    <footer className="h-6 bg-[#18181b] border-t border-zinc-800 flex items-center justify-between px-3 text-[11px] select-auto text-zinc-400 font-mono z-20">
       {/* Left: Extension status & manual toggle */}
       <div className="flex items-center gap-3">
         {/* Extension Bridge Manual Toggle */}

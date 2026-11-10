@@ -47,8 +47,29 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
   const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [isLogCopied, setIsLogCopied] = useState(false);
+  const [height, setHeight] = useState(280);
 
   if (!isOpen) return null;
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = height;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const deltaY = startY - moveEvent.clientY;
+      const newHeight = Math.max(120, Math.min(window.innerHeight * 0.85, startHeight + deltaY));
+      setHeight(newHeight);
+    };
+
+    const handleMouseUp = () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  };
 
   const toggleExpand = (id: string) => {
     setExpandedIds(prev => ({ ...prev, [id]: !prev[id] }));
@@ -91,15 +112,27 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
   ).length;
 
   return (
-    <div className="h-64 bg-[#121214] border-t-2 border-emerald-500/80 flex flex-col font-mono text-xs select-text shadow-2xl z-40">
+    <div 
+      className="bg-[#121214] border-t-2 border-emerald-500/80 flex flex-col font-mono text-xs select-auto shadow-2xl z-40 relative"
+      style={{ height: `${height}px` }}
+    >
+      {/* Resizable Top Border Handle */}
+      <div
+        onMouseDown={handleMouseDown}
+        className="h-2 w-full bg-emerald-500/50 hover:bg-emerald-400 cursor-ns-resize transition-colors flex items-center justify-center shrink-0 group"
+        title="Drag up or down to resize Extension Bridge Debugger"
+      >
+        <div className="w-14 h-1 bg-emerald-300/80 rounded-full group-hover:bg-white transition-colors" />
+      </div>
+
       {/* Top Header Bar */}
-      <div className="flex flex-wrap items-center justify-between px-3 py-1.5 bg-[#1a1a1e] border-b border-zinc-800 select-none gap-2">
+      <div className="flex flex-wrap items-center justify-between px-3 py-1.5 bg-[#1a1a1e] border-b border-zinc-800 select-auto gap-2">
         {/* Left Status & Title */}
         <div className="flex items-center gap-2">
           <div className="p-1 rounded bg-emerald-950 border border-emerald-500/40 text-emerald-400">
             <Bug className="w-3.5 h-3.5" />
           </div>
-          <span className="font-bold text-white text-xs tracking-tight">EXTENSION BRIDGE DEBUGGER</span>
+          <span className="font-bold text-white text-xs tracking-tight">Extension Bridge Debugger</span>
 
           {/* Status Badge */}
           <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
@@ -232,7 +265,7 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
 
       {/* Diagnostics Tip Banner if Save is Unacknowledged */}
       {lastSaveRequest && !lastSaveResponse && (
-        <div className="bg-amber-950/40 border-b border-amber-500/30 px-3 py-1 text-[11px] text-amber-200 flex items-center justify-between">
+        <div className="bg-amber-950/40 border-b border-amber-500/30 px-3 py-1 text-[11px] text-amber-200 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
             <Info className="w-3.5 h-3.5 text-amber-400 shrink-0" />
             <span>
@@ -271,7 +304,7 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
                 }`}
               >
                 {/* Row Header */}
-                <div className="flex items-center justify-between px-2.5 py-1.5 select-none">
+                <div className="flex items-center justify-between px-2.5 py-1.5 select-auto">
                   <div className="flex items-center gap-2 truncate">
                     {/* Expand icon */}
                     {isExpanded ? (
@@ -286,13 +319,13 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
                     </span>
 
                     {/* Direction Badge */}
-                    <span className={`px-1.5 py-0.2 rounded font-bold uppercase text-[9px] flex items-center gap-1 shrink-0 ${
+                    <span className={`px-1.5 py-0.2 rounded font-bold text-[9px] flex items-center gap-1 shrink-0 ${
                       isOutgoing
                         ? 'bg-blue-950 text-blue-300 border border-blue-500/30'
                         : 'bg-emerald-950 text-emerald-300 border border-emerald-500/30'
                     }`}>
                       {isOutgoing ? <ArrowUpRight className="w-2.5 h-2.5" /> : <ArrowDownLeft className="w-2.5 h-2.5" />}
-                      <span>{isOutgoing ? 'OUT' : 'IN'}</span>
+                      <span>{isOutgoing ? 'Out' : 'In'}</span>
                     </span>
 
                     {/* Channel Badge */}
@@ -316,7 +349,7 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
                       </span>
                     )}
 
-                    <span className={`px-1.5 py-0.2 rounded text-[9.5px] uppercase font-bold ${
+                    <span className={`px-1.5 py-0.2 rounded text-[9.5px] font-bold ${
                       msg.status === 'acknowledged' || msg.status === 'received'
                         ? 'bg-emerald-950 text-emerald-400 border border-emerald-500/30'
                         : msg.status === 'error' || msg.status === 'timeout'
@@ -343,7 +376,7 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
                 {/* Expanded Payload Inspector */}
                 {isExpanded && (
                   <div className="p-3 bg-black/80 border-t border-zinc-800/80 font-mono text-[10.5px]">
-                    <div className="text-zinc-400 text-[10px] mb-1 uppercase font-bold tracking-wider">
+                    <div className="text-zinc-400 text-[10px] mb-1 font-bold tracking-wider">
                       Payload Details:
                     </div>
                     <pre className="p-2.5 rounded bg-zinc-950 border border-zinc-850 text-emerald-300 overflow-x-auto whitespace-pre-wrap leading-relaxed">
@@ -352,7 +385,7 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
 
                     {msg.response && (
                       <div className="mt-2">
-                        <div className="text-zinc-400 text-[10px] mb-1 uppercase font-bold tracking-wider">
+                        <div className="text-zinc-400 text-[10px] mb-1 font-bold tracking-wider">
                           Extension Response:
                         </div>
                         <pre className="p-2.5 rounded bg-zinc-950 border border-zinc-850 text-blue-300 overflow-x-auto whitespace-pre-wrap leading-relaxed">
@@ -369,7 +402,7 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
       </div>
 
       {/* Footer Instructions Bar */}
-      <div className="px-3 py-1 bg-[#18181c] border-t border-zinc-800/80 flex items-center justify-between text-[10.5px] text-zinc-400">
+      <div className="px-3 py-1 bg-[#18181c] border-t border-zinc-800/80 flex items-center justify-between text-[10.5px] text-zinc-400 shrink-0">
         <div className="flex items-center gap-2">
           <span>Active Channels:</span>
           <span className="text-emerald-400">window.postMessage</span>

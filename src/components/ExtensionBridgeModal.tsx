@@ -185,7 +185,7 @@ async function saveTopCloudDrive(filePath, fileContent) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-      <div className="w-full max-w-4xl bg-[#18181b] border border-zinc-700/80 rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden select-none">
+      <div className="w-full max-w-4xl bg-[#18181b] border border-zinc-700/80 rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden select-auto">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 bg-zinc-900/80">
           <div className="flex items-center gap-3">
@@ -395,7 +395,7 @@ async function saveTopCloudDrive(filePath, fileContent) {
                         className="p-2 rounded bg-zinc-900/80 border border-zinc-800/80 text-[11px] select-text"
                       >
                         <div className="flex items-center justify-between text-zinc-400 pb-1 mb-1 border-b border-zinc-800/60">
-                          <span className={`px-1.5 py-0.2 rounded font-bold uppercase text-[9px] ${
+                          <span className={`px-1.5 py-0.2 rounded font-bold text-[9px] ${
                             msg.direction === 'incoming'
                               ? 'bg-blue-950 text-blue-400 border border-blue-500/30'
                               : 'bg-emerald-950 text-emerald-400 border border-emerald-500/30'

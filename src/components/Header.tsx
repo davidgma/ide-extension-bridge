@@ -71,7 +71,7 @@ export const Header: React.FC<HeaderProps> = ({
   const isCurrentDirty = activeFile?.isDirty;
 
   return (
-    <header className="h-12 bg-[#18181b] border-b border-zinc-800 flex items-center justify-between px-3 text-xs select-none shadow-md z-30">
+    <header className="h-12 bg-[#18181b] border-b border-zinc-800 flex items-center justify-between px-3 text-xs select-auto shadow-md z-30">
       {/* Left Brand & Hostname badge */}
       <div className="flex items-center gap-3">
         {/* Brand */}
@@ -83,7 +83,7 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="flex items-center gap-1.5 font-bold tracking-tight text-white text-sm">
               <span>FreshFood</span>
               <span className="text-emerald-400">.rocks</span>
-              <span className="text-[10px] uppercase font-mono px-1.5 py-0.2 bg-emerald-950 text-emerald-300 border border-emerald-500/30 rounded font-normal">
+              <span className="text-[10px] normal-case font-mono px-1.5 py-0.2 bg-emerald-950 text-emerald-300 border border-emerald-500/30 rounded font-normal">
                 Monarch IDE
               </span>
             </div>

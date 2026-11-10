@@ -26,13 +26,13 @@ export const OutputConsole: React.FC<OutputConsoleProps> = ({
   return (
     <div className="h-44 bg-[#141416] border-t border-zinc-800 flex flex-col font-mono text-xs select-text">
       {/* Console Bar */}
-      <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-900 border-b border-zinc-800 select-none">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-900 border-b border-zinc-800 select-auto">
         <div className="flex items-center gap-2">
           <Terminal className="w-3.5 h-3.5 text-emerald-400" />
-          <span className="font-semibold text-zinc-200 text-[11px]">OUTPUT TERMINAL</span>
+          <span className="font-semibold text-zinc-200 text-[11px]">Output Terminal</span>
           <span className="text-zinc-500 text-[10px]">({activeFile})</span>
           {result && (
-            <span className={`text-[10px] px-1.5 py-0.2 rounded font-bold uppercase ${
+            <span className={`text-[10px] px-1.5 py-0.2 rounded font-bold ${
               result.success ? 'bg-emerald-950 text-emerald-400' : 'bg-red-950 text-red-400'
             }`}>
               {result.success ? 'Passed' : 'Error'} ({result.executionTimeMs}ms)

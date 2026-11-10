@@ -24,7 +24,7 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
       onClick={onClose}
     >
       <div
-        className="w-full max-w-2xl bg-[#1c1c1f] border border-zinc-700 rounded-2xl shadow-2xl overflow-hidden select-none"
+        className="w-full max-w-2xl bg-[#1c1c1f] border border-zinc-700 rounded-2xl shadow-2xl overflow-hidden select-auto"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}

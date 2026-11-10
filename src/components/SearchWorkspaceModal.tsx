@@ -59,7 +59,7 @@ export const SearchWorkspaceModal: React.FC<SearchWorkspaceModalProps> = ({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-2xl bg-[#1c1c1f] border border-zinc-700/80 rounded-xl shadow-2xl overflow-hidden select-none flex flex-col max-h-[80vh]"
+        className="w-full max-w-2xl bg-[#1c1c1f] border border-zinc-700/80 rounded-xl shadow-2xl overflow-hidden select-auto flex flex-col max-h-[80vh]"
         onClick={e => e.stopPropagation()}
       >
         {/* Search header */}

@@ -2,7 +2,7 @@
 
 @layer base {
   body {
-    @apply bg-[#1e1e1e] text-[#cccccc] font-sans antialiased overflow-hidden select-none;
+    @apply bg-[#1e1e1e] text-[#cccccc] font-sans antialiased overflow-hidden select-auto;
     margin: 0;
     padding: 0;
     height: 100vh;

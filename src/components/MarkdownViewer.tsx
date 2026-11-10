@@ -101,7 +101,7 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({ content, filenam
           elements.push(
             <div key={`code-${i}`} className="my-4 rounded-lg overflow-hidden border border-zinc-800 bg-[#121214]">
               <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-900 border-b border-zinc-800/80 text-xs text-zinc-400">
-                <span className="font-mono text-[11px] uppercase tracking-wider text-emerald-400">
+                <span className="font-mono text-[11px] tracking-wider text-emerald-400">
                   {codeBlockLang || 'code'}
                 </span>
                 <button

@@ -109,7 +109,7 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
   // If no file is open: Welcome Hero
   if (!activeFile) {
     return (
-      <div className="h-full w-full flex flex-col items-center justify-center bg-[#18181b] p-6 text-center select-none">
+      <div className="h-full w-full flex flex-col items-center justify-center bg-[#18181b] p-6 text-center select-auto">
         <div className="max-w-md w-full space-y-6">
           <div className="mx-auto w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-700 flex items-center justify-center shadow-2xl shadow-emerald-950/60">
             <Radio className="w-8 h-8 text-black animate-pulse" />
@@ -147,13 +147,13 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
                 <Radio className="w-4 h-4 text-emerald-400" />
                 <span>Bridge Protocol</span>
               </div>
-              <div className="text-[11px] text-zinc-500 mt-1 font-mono">Inspect / Test</div>
+              <div className="text-[11px] text-zinc-500 mt-1 font-mono font-normal">Inspect / Test</div>
             </button>
           </div>
 
           {/* Quick file pickers from loaded files */}
           <div className="text-left bg-zinc-900/60 border border-zinc-800 rounded-xl p-3">
-            <div className="text-[10px] uppercase font-bold text-zinc-500 font-mono tracking-wider mb-2">
+            <div className="text-[10px] font-bold text-zinc-500 font-mono tracking-wider mb-2">
               Recent Workspace Files
             </div>
             <div className="space-y-1">
@@ -167,7 +167,7 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
                     <FileCode className="w-3.5 h-3.5 text-emerald-400" />
                     {file.name}
                   </span>
-                  <span className="text-[10px] uppercase font-mono text-zinc-500">
+                  <span className="text-[10px] font-mono text-zinc-500">
                     {file.cloudProvider}
                   </span>
                 </div>

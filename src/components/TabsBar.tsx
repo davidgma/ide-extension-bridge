@@ -65,7 +65,7 @@ export const TabsBar: React.FC<TabsBarProps> = ({
   }
 
   return (
-    <div className="h-9 bg-[#1b1b1e] border-b border-zinc-800/90 flex items-center justify-between select-none overflow-hidden">
+    <div className="h-9 bg-[#1b1b1e] border-b border-zinc-800/90 flex items-center justify-between select-auto overflow-hidden">
       {/* Scrollable Tabs */}
       <div className="flex items-center h-full overflow-x-auto no-scrollbar flex-1">
         {openTabs.map(tab => {

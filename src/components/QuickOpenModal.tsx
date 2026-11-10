@@ -58,7 +58,7 @@ export const QuickOpenModal: React.FC<QuickOpenModalProps> = ({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-xl bg-[#1c1c1f] border border-zinc-700/80 rounded-xl shadow-2xl overflow-hidden select-none"
+        className="w-full max-w-xl bg-[#1c1c1f] border border-zinc-700/80 rounded-xl shadow-2xl overflow-hidden select-auto"
         onClick={e => e.stopPropagation()}
       >
         {/* Search Input Bar */}
@@ -121,7 +121,7 @@ export const QuickOpenModal: React.FC<QuickOpenModalProps> = ({
                       {file.path}
                     </span>
                   </div>
-                  <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-zinc-800 text-emerald-400 shrink-0 ml-2">
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-emerald-400 shrink-0 ml-2">
                     {file.cloudProvider}
                   </span>
                 </div>
