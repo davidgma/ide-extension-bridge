@@ -64,11 +64,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [renameInput, setRenameInput] = useState('');
 
   // Filter files if searching
-  const filteredFiles = files.filter(f => 
+  const filteredFiles = React.useMemo(() => files.filter(f => 
     !searchTerm || f.path.toLowerCase().includes(searchTerm.toLowerCase()) || f.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  ), [files, searchTerm]);
 
-  const fileTree = buildFileTree(filteredFiles);
+  const fileTree = React.useMemo(() => buildFileTree(filteredFiles), [filteredFiles]);
 
   const toggleFolder = (path: string) => {
     setCollapsedFolders(prev => ({

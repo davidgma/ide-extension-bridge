@@ -27,7 +27,6 @@ interface EditorAreaProps {
   onContentChange: (fileId: string, newContent: string) => void;
   onSaveFile: (file: CloudFile) => void;
   onCursorChange: (pos: { line: number; col: number }, selectionLength: number) => void;
-  onStatsChange: (lines: number, chars: number) => void;
   onOpenQuickOpen: () => void;
   onOpenBridgeModal: () => void;
   onOpenFile: (fileId: string) => void;
@@ -43,7 +42,6 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
   onContentChange,
   onSaveFile,
   onCursorChange,
-  onStatsChange,
   onOpenQuickOpen,
   onOpenBridgeModal,
   onOpenFile,
@@ -51,6 +49,18 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
 }) => {
   const monacoRef = useRef<Monaco | null>(null);
   const editorRef = useRef<any>(null);
+  const onCursorChangeRef = useRef(onCursorChange);
+  const onSaveFileRef = useRef(onSaveFile);
+  const activeFileRef = useRef(activeFile);
+
+  useEffect(() => {
+    onCursorChangeRef.current = onCursorChange;
+  }, [onCursorChange]);
+
+  useEffect(() => {
+    onSaveFileRef.current = onSaveFile;
+    activeFileRef.current = activeFile;
+  }, [onSaveFile, activeFile]);
 
   const handleEditorMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
@@ -62,8 +72,8 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
 
     // Keyboard shortcut for Cmd+S / Ctrl+S inside Monaco
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-      if (activeFile) {
-        onSaveFile(activeFile);
+      if (activeFileRef.current) {
+        onSaveFileRef.current(activeFileRef.current);
       }
     });
 
@@ -74,25 +84,19 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
 
     // Track cursor movements and selection
     editor.onDidChangeCursorPosition(e => {
-      onCursorChange({ line: e.position.lineNumber, col: e.position.column }, 0);
+      onCursorChangeRef.current({ line: e.position.lineNumber, col: e.position.column }, 0);
     });
 
     editor.onDidChangeCursorSelection(e => {
       const model = editor.getModel();
       if (model) {
         const text = model.getValueInRange(e.selection);
-        onCursorChange(
+        onCursorChangeRef.current(
           { line: e.selection.positionLineNumber, col: e.selection.positionColumn },
           text.length
         );
       }
     });
-
-    // Initial stats
-    const model = editor.getModel();
-    if (model) {
-      onStatsChange(model.getLineCount(), model.getValueLength());
-    }
   };
 
   // Sync theme changes
@@ -101,15 +105,6 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
       monacoRef.current.editor.setTheme(activeTheme);
     }
   }, [activeTheme]);
-
-  // Update line and character stats whenever active content changes
-  useEffect(() => {
-    if (activeFile) {
-      const lines = activeFile.content.split('\n').length;
-      const chars = activeFile.content.length;
-      onStatsChange(lines, chars);
-    }
-  }, [activeFile?.content, activeFile?.id, onStatsChange]);
 
   // If no file is open: Welcome Hero
   if (!activeFile) {

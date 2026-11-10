@@ -220,6 +220,8 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({ content, filenam
     return elements;
   };
 
+  const renderedElements = React.useMemo(() => renderMarkdown(content), [content, copiedIndex]);
+
   return (
     <div className="h-full w-full overflow-y-auto bg-[#18181b] p-6 lg:p-8 select-text">
       <div className="max-w-4xl mx-auto">
@@ -236,7 +238,7 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({ content, filenam
           </span>
         </div>
         <div className="prose prose-invert max-w-none">
-          {renderMarkdown(content)}
+          {renderedElements}
         </div>
       </div>
     </div>

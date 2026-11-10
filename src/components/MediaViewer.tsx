@@ -57,6 +57,7 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({ file }) => {
 
       let animationFrameId: number;
       let frame = 0;
+      let lastStateUpdate = performance.now();
 
       const renderCanvas = () => {
         if (!isPlaying) return;
@@ -111,9 +112,15 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({ file }) => {
 
         ctx.fillStyle = '#38bdf8';
         ctx.font = '14px monospace';
-        ctx.fillText(`Timestamp: ${new Date().toISOString()} | FPS: 60`, w / 2, h / 2 + 120);
+        ctx.fillText(`Stream Telemetry Active | FPS: 60`, w / 2, h / 2 + 120);
 
-        setCurrentTime(c => (c >= duration ? 0 : c + 0.016));
+        // Only update React state every 500ms instead of 60 times a second
+        const now = performance.now();
+        if (now - lastStateUpdate > 500) {
+          lastStateUpdate = now;
+          setCurrentTime(c => (c >= duration ? 0 : c + 0.5));
+        }
+
         animationFrameId = requestAnimationFrame(renderCanvas);
       };
 

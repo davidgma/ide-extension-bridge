@@ -3,14 +3,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { CloudFile, CloudProvider, EditorTheme, OpenTab } from './types/ide';
 import { INITIAL_CLOUD_FILES } from './utils/fileSystem';
 import { useExtensionBridge } from './hooks/useExtensionBridge';
+import { executeCode, RunResult } from './utils/codeRunner';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { TabsBar } from './components/TabsBar';
 import { EditorArea } from './components/EditorArea';
+import { OutputConsole } from './components/OutputConsole';
 import { StatusBar } from './components/StatusBar';
 import { ExtensionBridgeModal } from './components/ExtensionBridgeModal';
 import { QuickOpenModal } from './components/QuickOpenModal';
@@ -37,34 +39,38 @@ export default function App() {
   const [minimap, setMinimap] = useState(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
-  // State: Cursor and metrics
+  // State: Cursor
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
   const [selectionLength, setSelectionLength] = useState(0);
-  const [lineCount, setLineCount] = useState(0);
-  const [charCount, setCharCount] = useState(0);
 
-  // State: Modals
+  // State: Code Execution
+  const [consoleResult, setConsoleResult] = useState<RunResult | null>(null);
+  const [isConsoleOpen, setIsConsoleOpen] = useState(false);
+  const [isRunningCode, setIsRunningCode] = useState(false);
+
+  // State: Modals & Notification
   const [isBridgeModalOpen, setIsBridgeModalOpen] = useState(false);
   const [isQuickOpenOpen, setIsQuickOpenOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
-  const [statusNotification, setStatusNotification] = useState<string | null>('Workspace loaded from pCloud');
+  const [statusNotification, setStatusNotification] = useState<string | null>(null);
 
-  // Flash notification helper
+  // Notification helper
   const notify = useCallback((msg: string) => {
     setStatusNotification(msg);
     setTimeout(() => {
       setStatusNotification(current => (current === msg ? null : current));
-    }, 4000);
+    }, 3500);
   }, []);
 
-  // Extension Bridge Hook
+  // Extension Bridge Hook with manual start/stop
   const {
     extensionStatus,
     handshakeInfo,
     messagesLog,
     isSaving,
-    sendPingHandshake,
+    startBridge,
+    stopBridge,
     saveCloudFile,
     saveAllCloudFiles,
     simulateHandshake,
@@ -76,7 +82,6 @@ export default function App() {
       if (provider) setCloudProvider(provider);
       if (newWorkspaceName) setWorkspaceName(newWorkspaceName);
       
-      // Open first file
       if (incomingFiles.length > 0) {
         const first = incomingFiles[0];
         setOpenTabs([{ fileId: first.id, path: first.path, title: first.name, previewMode: 'split' }]);
@@ -96,8 +101,23 @@ export default function App() {
     },
   });
 
-  const activeFile = files.find(f => f.id === activeTabId) || null;
-  const activeTab = openTabs.find(t => t.fileId === activeTabId);
+  const activeFile = useMemo(() => files.find(f => f.id === activeTabId) || null, [files, activeTabId]);
+  const activeTab = useMemo(() => openTabs.find(t => t.fileId === activeTabId), [openTabs, activeTabId]);
+
+  const lineCount = useMemo(() => {
+    if (!activeFile || activeFile.isBinary) return 0;
+    return activeFile.content.split('\n').length;
+  }, [activeFile?.content, activeFile?.isBinary]);
+
+  const charCount = useMemo(() => {
+    if (!activeFile || activeFile.isBinary) return 0;
+    return activeFile.content.length;
+  }, [activeFile?.content, activeFile?.isBinary]);
+
+  const handleCursorChange = useCallback((pos: { line: number; col: number }, selLen: number) => {
+    setCursorPos(prev => (prev.line === pos.line && prev.col === pos.col ? prev : pos));
+    setSelectionLength(prev => (prev === selLen ? prev : selLen));
+  }, []);
 
   // File selection
   const handleSelectFile = useCallback((fileId: string) => {
@@ -167,9 +187,26 @@ export default function App() {
       saveAllCloudFiles(dirtyFiles);
       notify(`Saved ${dirtyFiles.length} changed files to ${cloudProvider}`);
     } else {
-      notify('All files are already up-to-date in cloud');
+      notify('All files are up-to-date in cloud');
     }
   }, [files, saveAllCloudFiles, cloudProvider, notify]);
+
+  // Run Code
+  const handleRunCode = useCallback(() => {
+    if (!activeFile) return;
+    setIsRunningCode(true);
+    setIsConsoleOpen(true);
+    setTimeout(() => {
+      const res = executeCode(activeFile.name, activeFile.content);
+      setConsoleResult(res);
+      setIsRunningCode(false);
+      if (res.success) {
+        notify(`Executed ${activeFile.name} successfully`);
+      } else {
+        notify(`Execution error in ${activeFile.name}`);
+      }
+    }, 120);
+  }, [activeFile, notify]);
 
   // Create new file
   const handleCreateFile = useCallback((path: string, content = '') => {
@@ -331,7 +368,7 @@ export default function App() {
 
   return (
     <div className="h-screen w-screen flex flex-col bg-[#18181b] text-zinc-200 select-none overflow-hidden">
-      {/* Top Header */}
+      {/* Top Header with manual extension bridge start/stop and Run button */}
       <Header
         activeFile={activeFile}
         files={files}
@@ -343,18 +380,22 @@ export default function App() {
         minimap={minimap}
         lineCount={lineCount}
         charCount={charCount}
+        isRunningCode={isRunningCode}
         onThemeChange={setActiveTheme}
         onToggleWordWrap={() => setWordWrap(!wordWrap)}
         onToggleMinimap={() => setMinimap(!minimap)}
         onSaveCurrent={handleSaveCurrent}
         onSaveAll={handleSaveAll}
+        onStartBridge={startBridge}
+        onStopBridge={stopBridge}
+        onRunCode={handleRunCode}
         onOpenQuickOpen={() => setIsQuickOpenOpen(true)}
         onOpenSearch={() => setIsSearchOpen(true)}
         onOpenBridgeModal={() => setIsBridgeModalOpen(true)}
         onOpenShortcutsModal={() => setIsShortcutsOpen(true)}
       />
 
-      {/* Main Workspace: Sidebar + Editor + Special Viewers */}
+      {/* Main Workspace: Sidebar + Editor + Console */}
       <div className="flex-1 flex overflow-hidden">
         {isSidebarOpen && (
           <Sidebar
@@ -385,27 +426,33 @@ export default function App() {
             onSetPreviewMode={handleSetPreviewMode}
           />
 
-          <div className="flex-1 min-h-0 overflow-hidden">
-            <EditorArea
-              activeFile={activeFile}
-              activeTab={activeTab}
-              activeTheme={activeTheme}
-              wordWrap={wordWrap}
-              minimap={minimap}
-              onContentChange={handleContentChange}
-              onSaveFile={saveCloudFile}
-              onCursorChange={(pos, selLen) => {
-                setCursorPos(pos);
-                setSelectionLength(selLen);
-              }}
-              onStatsChange={(lines, chars) => {
-                setLineCount(lines);
-                setCharCount(chars);
-              }}
-              onOpenQuickOpen={() => setIsQuickOpenOpen(true)}
-              onOpenBridgeModal={() => setIsBridgeModalOpen(true)}
-              onOpenFile={handleSelectFile}
-              files={files}
+          <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <EditorArea
+                activeFile={activeFile}
+                activeTab={activeTab}
+                activeTheme={activeTheme}
+                wordWrap={wordWrap}
+                minimap={minimap}
+                onContentChange={handleContentChange}
+                onSaveFile={saveCloudFile}
+                onCursorChange={handleCursorChange}
+                onOpenQuickOpen={() => setIsQuickOpenOpen(true)}
+                onOpenBridgeModal={() => setIsBridgeModalOpen(true)}
+                onOpenFile={handleSelectFile}
+                files={files}
+              />
+            </div>
+
+            {/* Output / Terminal Drawer */}
+            <OutputConsole
+              isOpen={isConsoleOpen}
+              activeFile={activeFile?.name || 'Untitled'}
+              result={consoleResult}
+              isRunning={isRunningCode}
+              onClose={() => setIsConsoleOpen(false)}
+              onClear={() => setConsoleResult(null)}
+              onRunAgain={handleRunCode}
             />
           </div>
         </div>
@@ -420,7 +467,11 @@ export default function App() {
         handshakeInfo={handshakeInfo}
         isSaving={isSaving}
         statusNotification={statusNotification}
+        onStartBridge={startBridge}
+        onStopBridge={stopBridge}
         onOpenBridgeModal={() => setIsBridgeModalOpen(true)}
+        onToggleConsole={() => setIsConsoleOpen(prev => !prev)}
+        isConsoleOpen={isConsoleOpen}
       />
 
       {/* Extension Bridge Console & Inspector Modal */}
@@ -430,7 +481,7 @@ export default function App() {
         extensionStatus={extensionStatus}
         handshakeInfo={handshakeInfo}
         messagesLog={messagesLog}
-        onSendPing={sendPingHandshake}
+        onSendPing={startBridge}
         onSimulateHandshake={simulateHandshake}
         onSimulateLoadPreset={simulateLoadPreset}
         onClearLogs={clearLogs}

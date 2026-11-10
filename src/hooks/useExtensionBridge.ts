@@ -12,12 +12,15 @@ export function useExtensionBridge({
   onFileSaveConfirmed,
   onFileSaveError,
 }: UseExtensionBridgeProps = {}) {
+  // Idle by default: The site does nothing until manually started by user
   const [extensionStatus, setExtensionStatus] = useState<ExtensionStatus>('disconnected');
   const [handshakeInfo, setHandshakeInfo] = useState<ExtensionHandshakeInfo | null>(null);
   const [messagesLog, setMessagesLog] = useState<BridgeMessage[]>([]);
-  const [lastSavedTimestamp, setLastSavedTimestamp] = useState<number | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isBridgeRunning, setIsBridgeRunning] = useState(false);
+
   const pingTimeoutRef = useRef<number | null>(null);
+  const isRunningRef = useRef(false);
 
   // Helper to record messages in the log
   const logMessage = useCallback((direction: 'incoming' | 'outgoing', type: string, payload: any) => {
@@ -46,25 +49,55 @@ export function useExtensionBridge({
     );
   }, [logMessage]);
 
-  // Send PING_HANDSHAKE to find Clockie McClockface extension
-  const sendPingHandshake = useCallback(() => {
+  // Manually stop the bridge
+  const stopBridge = useCallback(() => {
+    if (pingTimeoutRef.current) {
+      window.clearTimeout(pingTimeoutRef.current);
+      pingTimeoutRef.current = null;
+    }
+    isRunningRef.current = false;
+    setIsBridgeRunning(false);
+    setExtensionStatus('disconnected');
+    setHandshakeInfo(null);
+    logMessage('outgoing', 'DISCONNECT_HANDSHAKE', { reason: 'Bridge manually stopped by user' });
+  }, [logMessage]);
+
+  // Manually start the bridge
+  const startBridge = useCallback(() => {
+    if (pingTimeoutRef.current) {
+      window.clearTimeout(pingTimeoutRef.current);
+    }
+    isRunningRef.current = true;
+    setIsBridgeRunning(true);
     setExtensionStatus('connecting');
-    const startTime = performance.now();
+
     postToExtension('PING_HANDSHAKE', {
       client: 'Monarch IDE & Cloud Studio',
       domain: 'ide.freshfood.rocks',
       timestamp: Date.now(),
     });
 
-    if (pingTimeoutRef.current) {
-      window.clearTimeout(pingTimeoutRef.current);
-    }
-
-    // Set fallback timeout if extension doesn't answer within 3.5s
+    // Timeout: if no real extension answers within 2.5s, fallback to connected simulation
+    // so user can test the workspace seamlessly, or stop
     pingTimeoutRef.current = window.setTimeout(() => {
-      setExtensionStatus(prev => (prev === 'connecting' ? 'disconnected' : prev));
-    }, 3500);
-  }, [postToExtension]);
+      if (isRunningRef.current) {
+        setExtensionStatus('connected');
+        setHandshakeInfo({
+          name: 'Clockie McClockface Extension',
+          version: 'v2.4.1 (FreshFood Vault)',
+          provider: 'pCloud',
+          connectedAt: new Date().toLocaleTimeString(),
+          latencyMs: 12,
+        });
+        logMessage('incoming', 'PONG_HANDSHAKE', {
+          status: 'CONNECTED',
+          extensionName: 'Clockie McClockface Extension',
+          version: 'v2.4.1',
+          cloudProvider: 'pCloud'
+        });
+      }
+    }, 1500);
+  }, [postToExtension, logMessage]);
 
   // Save single file to cloud
   const saveCloudFile = useCallback((file: CloudFile) => {
@@ -78,15 +111,12 @@ export function useExtensionBridge({
       mimeType: file.mimeType,
     });
 
-    // If extension is connected, it will reply with SAVE_CLOUD_FILE_SUCCESS.
-    // In standalone mode or for immediate optimistic UX:
     window.setTimeout(() => {
       setIsSaving(false);
-      setLastSavedTimestamp(Date.now());
       if (onFileSaveConfirmed) {
         onFileSaveConfirmed(file.id, Date.now());
       }
-    }, 400);
+    }, 250);
   }, [postToExtension, onFileSaveConfirmed]);
 
   // Save all files batch to cloud
@@ -104,18 +134,19 @@ export function useExtensionBridge({
 
     window.setTimeout(() => {
       setIsSaving(false);
-      setLastSavedTimestamp(Date.now());
       files.forEach(f => {
         if (onFileSaveConfirmed) {
           onFileSaveConfirmed(f.id, Date.now());
         }
       });
-    }, 600);
+    }, 350);
   }, [postToExtension, onFileSaveConfirmed]);
 
-  // Simulation mode helper: allow users to simulate extension connectivity and payloads
+  // Simulation mode helper
   const simulateHandshake = useCallback((connected = true, provider: CloudProvider = 'pCloud') => {
     if (connected) {
+      isRunningRef.current = true;
+      setIsBridgeRunning(true);
       const info: ExtensionHandshakeInfo = {
         name: 'Clockie McClockface Extension',
         version: 'v2.4.1 (Monarch Cloud Sync)',
@@ -132,13 +163,11 @@ export function useExtensionBridge({
         provider,
       });
     } else {
-      setExtensionStatus('disconnected');
-      setHandshakeInfo(null);
-      logMessage('incoming', 'DISCONNECT_HANDSHAKE', { reason: 'User initiated standalone switch' });
+      stopBridge();
     }
-  }, [logMessage]);
+  }, [logMessage, stopBridge]);
 
-  // Simulate loading payload from different cloud providers
+  // Preset loader
   const simulateLoadPreset = useCallback((preset: 'pcloud' | 'gdrive' | 'dropbox') => {
     let providerName: CloudProvider = 'pCloud';
     let sampleFiles: CloudFile[] = [];
@@ -191,23 +220,37 @@ export function useExtensionBridge({
     }
   }, [onFilesLoaded, simulateHandshake, logMessage]);
 
-  // Listen for window postMessages (from extension background or content script)
+  // Only listen to window postMessages when bridge is actively running
   useEffect(() => {
+    if (!isBridgeRunning) return;
+
     const handleMessage = (event: MessageEvent) => {
-      // Security check: Ignore own messages or non-object events
       if (!event.data || typeof event.data !== 'object') return;
       if (event.data.source === 'FRESHFOOD_MONARCH_IDE') return;
 
       const { action, type, payload } = event.data;
       const messageType = action || type;
 
-      if (!messageType) return;
+      if (!messageType || typeof messageType !== 'string') return;
+
+      const VALID_BRIDGE_ACTIONS = [
+        'PING_HANDSHAKE',
+        'PONG_HANDSHAKE',
+        'LOAD_FILES_PAYLOAD',
+        'SAVE_CLOUD_FILE_SUCCESS',
+        'SAVE_CLOUD_FILE_ERROR',
+        'DISCONNECT_HANDSHAKE'
+      ];
+
+      const isKnownBridgeAction = VALID_BRIDGE_ACTIONS.includes(messageType);
+      const isKnownBridgeSource = event.data.source === 'CLOCKIE_MCCLOCKFACE_EXT';
+
+      if (!isKnownBridgeAction && !isKnownBridgeSource) return;
 
       logMessage('incoming', messageType, payload || event.data);
 
       switch (messageType) {
         case 'PING_HANDSHAKE': {
-          // Extension pinged us, respond with PONG
           setExtensionStatus('connected');
           const extName = payload?.extensionName || 'Clockie McClockface Extension';
           const extVer = payload?.version || 'v2.4.1';
@@ -228,7 +271,6 @@ export function useExtensionBridge({
         }
 
         case 'PONG_HANDSHAKE': {
-          // Handshake acknowledged by extension
           setExtensionStatus('connected');
           const extName = payload?.extensionName || payload?.name || 'Clockie McClockface Extension';
           const extVer = payload?.version || 'v2.4.1';
@@ -244,7 +286,6 @@ export function useExtensionBridge({
         }
 
         case 'LOAD_FILES_PAYLOAD': {
-          // Incoming files or folder structure
           const filesData: any[] = payload?.files || payload?.fileList || [];
           const provider: CloudProvider = payload?.cloudProvider || payload?.provider || 'pCloud';
           const workspaceName: string = payload?.workspaceName || 'Cloud Drive Workspace';
@@ -273,7 +314,6 @@ export function useExtensionBridge({
           const fileId = payload?.fileId;
           const timestamp = payload?.timestamp || Date.now();
           setIsSaving(false);
-          setLastSavedTimestamp(timestamp);
           if (fileId && onFileSaveConfirmed) {
             onFileSaveConfirmed(fileId, timestamp);
           }
@@ -293,6 +333,8 @@ export function useExtensionBridge({
         case 'DISCONNECT_HANDSHAKE': {
           setExtensionStatus('disconnected');
           setHandshakeInfo(null);
+          setIsBridgeRunning(false);
+          isRunningRef.current = false;
           break;
         }
 
@@ -302,42 +344,22 @@ export function useExtensionBridge({
     };
 
     window.addEventListener('message', handleMessage);
-
-    // Initial handshake ping
-    sendPingHandshake();
-
-    // Default to Connected simulation if loaded without active extension so user experiences the full connected suite immediately
-    const initialSimTimer = window.setTimeout(() => {
-      setExtensionStatus(prev => {
-        if (prev === 'connecting') {
-          // Default to connected Clockie McClockface Extension as requested in prompt!
-          setHandshakeInfo({
-            name: 'Clockie McClockface Extension',
-            version: 'v2.4.1 (FreshFood Vault)',
-            provider: 'pCloud',
-            connectedAt: new Date().toLocaleTimeString(),
-            latencyMs: 16,
-          });
-          return 'connected';
-        }
-        return prev;
-      });
-    }, 800);
-
     return () => {
       window.removeEventListener('message', handleMessage);
-      if (pingTimeoutRef.current) window.clearTimeout(pingTimeoutRef.current);
-      window.clearTimeout(initialSimTimer);
+      if (pingTimeoutRef.current) {
+        window.clearTimeout(pingTimeoutRef.current);
+      }
     };
-  }, [sendPingHandshake, logMessage, postToExtension, onFilesLoaded, onFileSaveConfirmed, onFileSaveError]);
+  }, [isBridgeRunning, logMessage, postToExtension, onFilesLoaded, onFileSaveConfirmed, onFileSaveError]);
 
   return {
     extensionStatus,
     handshakeInfo,
     messagesLog,
     isSaving,
-    lastSavedTimestamp,
-    sendPingHandshake,
+    isBridgeRunning,
+    startBridge,
+    stopBridge,
     saveCloudFile,
     saveAllCloudFiles,
     simulateHandshake,
