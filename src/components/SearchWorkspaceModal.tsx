@@ -33,10 +33,12 @@ export const SearchWorkspaceModal: React.FC<SearchWorkspaceModalProps> = ({
 
   if (!isOpen) return null;
 
+  const unloadedCount = files.filter(f => !f.isDirectory && f.contentLoaded === false).length;
+
   const results: MatchResult[] = [];
   if (searchTerm.trim().length >= 2) {
     for (const file of files) {
-      if (file.isBinary) continue;
+      if (file.isBinary || file.isDirectory || file.contentLoaded === false) continue;
       const lines = file.content.split('\n');
       lines.forEach((line, idx) => {
         const matches = isCaseSensitive
@@ -68,7 +70,7 @@ export const SearchWorkspaceModal: React.FC<SearchWorkspaceModalProps> = ({
           <input
             ref={inputRef}
             type="text"
-            placeholder="Search all files in workspace..."
+            placeholder="Search loaded files in workspace..."
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
             className="w-full bg-transparent text-sm text-white placeholder-zinc-500 outline-none font-mono"
@@ -91,7 +93,7 @@ export const SearchWorkspaceModal: React.FC<SearchWorkspaceModalProps> = ({
         <div className="flex-1 overflow-y-auto p-2">
           {searchTerm.trim().length < 2 ? (
             <div className="p-6 text-center text-xs text-zinc-500">
-              Type at least 2 characters to search across all workspace files...
+              Type at least 2 characters to search across loaded workspace files...
             </div>
           ) : results.length === 0 ? (
             <div className="p-6 text-center text-xs text-zinc-500">
@@ -131,7 +133,11 @@ export const SearchWorkspaceModal: React.FC<SearchWorkspaceModalProps> = ({
 
         {/* Footer */}
         <div className="px-4 py-2 border-t border-zinc-800 bg-zinc-900/60 text-[11px] text-zinc-500 flex justify-between">
-          <span>Search files in workspace</span>
+          <span>
+            {unloadedCount > 0
+              ? `${unloadedCount} unloaded file(s) excluded until opened`
+              : 'Searching all loaded workspace files'}
+          </span>
           <span>Press <kbd className="bg-zinc-800 px-1 rounded text-zinc-400">Esc</kbd> to close</span>
         </div>
       </div>

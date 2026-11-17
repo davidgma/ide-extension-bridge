@@ -28,8 +28,12 @@ export const QuickOpenModal: React.FC<QuickOpenModalProps> = ({
     }
   }, [isOpen]);
 
-  const filtered = files.filter(f =>
-    !query || f.path.toLowerCase().includes(query.toLowerCase()) || f.name.toLowerCase().includes(query.toLowerCase())
+  const filtered = files.filter(
+    f =>
+      !f.isDirectory &&
+      (!query ||
+        f.path.toLowerCase().includes(query.toLowerCase()) ||
+        f.name.toLowerCase().includes(query.toLowerCase()))
   );
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -108,9 +112,9 @@ export const QuickOpenModal: React.FC<QuickOpenModalProps> = ({
                 >
                   <div className="flex items-center gap-2 truncate">
                     {isImg ? (
-                      <ImageIcon className="w-4 h-4 text-pink-400 shrink-0" />
+                      <ImageIcon className="w-4 h-4 text-emerald-400 shrink-0" />
                     ) : isVid ? (
-                      <Film className="w-4 h-4 text-purple-400 shrink-0" />
+                      <Film className="w-4 h-4 text-blue-400 shrink-0" />
                     ) : isMd ? (
                       <FileText className="w-4 h-4 text-teal-400 shrink-0" />
                     ) : (

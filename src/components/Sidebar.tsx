@@ -1,32 +1,38 @@
+/**
+ * Workspace File Explorer Sidebar.
+ * Displays folders (including empty subdirectories) and files from H2_WORKSPACE_TREE,
+ * supports nested file creation (H2_SAVE_FILE_REQ) and file/folder deletion (H2_DELETE_FILE_REQ).
+ *
+ * Official Documentation:
+ * - Lucide React Icons: https://lucide.dev/guide/packages/lucide-react
+ */
+
 import React, { useState } from 'react';
-import { 
-  Folder, 
-  FolderOpen, 
-  File, 
-  FileCode, 
-  FileText, 
-  FileJson, 
-  Code2, 
-  Terminal, 
-  Database, 
-  Image as ImageIcon, 
+import {
+  Folder,
+  FolderOpen,
+  File,
+  FileCode,
+  FileText,
+  FileJson,
+  Code2,
+  Terminal,
+  Database,
+  Image as ImageIcon,
   Film,
-  Plus, 
-  FolderPlus, 
-  Upload, 
-  Download, 
-  Search, 
-  ChevronRight, 
-  ChevronDown, 
-  MoreVertical, 
-  Trash2, 
-  Edit2, 
+  Plus,
+  FolderPlus,
+  Upload,
+  Download,
+  Search,
+  ChevronRight,
+  ChevronDown,
+  Trash2,
+  Edit2,
   HardDrive,
-  RefreshCw,
-  FolderTree
 } from 'lucide-react';
 import { CloudFile, FileTreeNode, CloudProvider } from '../types/ide';
-import { getFileExtension, isMarkdownFile, isImageFile, isVideoFile, buildFileTree } from '../utils/fileSystem';
+import { getFileExtension, isImageFile, isVideoFile, buildFileTree } from '../utils/fileSystem';
 
 interface SidebarProps {
   files: CloudFile[];
@@ -37,6 +43,7 @@ interface SidebarProps {
   onCreateFile: (path: string, content?: string) => void;
   onCreateFolder: (folderPath: string) => void;
   onDeleteFile: (fileId: string) => void;
+  onDeleteFolder: (folderPath: string, folderId?: string) => void;
   onRenameFile: (fileId: string, newPath: string) => void;
   onUploadFiles: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onExportWorkspace: () => void;
@@ -51,6 +58,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onCreateFile,
   onCreateFolder,
   onDeleteFile,
+  onDeleteFolder,
   onRenameFile,
   onUploadFiles,
   onExportWorkspace,
@@ -62,11 +70,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [newPathInput, setNewPathInput] = useState('');
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameInput, setRenameInput] = useState('');
+  const [confirmDeleteKey, setConfirmDeleteKey] = useState<string | null>(null);
+
+  const fileCount = React.useMemo(() => files.filter(f => !f.isDirectory).length, [files]);
 
   // Filter files if searching
-  const filteredFiles = React.useMemo(() => files.filter(f => 
-    !searchTerm || f.path.toLowerCase().includes(searchTerm.toLowerCase()) || f.name.toLowerCase().includes(searchTerm.toLowerCase())
-  ), [files, searchTerm]);
+  const filteredFiles = React.useMemo(
+    () =>
+      files.filter(
+        f =>
+          !searchTerm ||
+          f.path.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          f.name.toLowerCase().includes(searchTerm.toLowerCase())
+      ),
+    [files, searchTerm]
+  );
 
   const fileTree = React.useMemo(() => buildFileTree(filteredFiles), [filteredFiles]);
 
@@ -79,38 +97,44 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const getFileIcon = (filename: string) => {
     const ext = getFileExtension(filename);
-    if (isImageFile(filename)) return <ImageIcon className="w-3.5 h-3.5 text-pink-400 shrink-0" />;
-    if (isVideoFile(filename)) return <Film className="w-3.5 h-3.5 text-purple-400 shrink-0" />;
+    if (isImageFile(filename)) return <ImageIcon className="w-3.5 h-3.5 text-emerald-400 shrink-0" />;
+    if (isVideoFile(filename)) return <Film className="w-3.5 h-3.5 text-blue-400 shrink-0" />;
     if (['ts', 'tsx'].includes(ext)) return <Code2 className="w-3.5 h-3.5 text-blue-400 shrink-0" />;
-    if (['js', 'jsx'].includes(ext)) return <FileCode className="w-3.5 h-3.5 text-amber-400 shrink-0" />;
+    if (['js', 'jsx'].includes(ext)) return <FileCode className="w-3.5 h-3.5 text-red-400 shrink-0" />;
     if (['json'].includes(ext)) return <FileJson className="w-3.5 h-3.5 text-emerald-400 shrink-0" />;
     if (['css', 'scss'].includes(ext)) return <FileCode className="w-3.5 h-3.5 text-sky-400 shrink-0" />;
     if (['md', 'markdown'].includes(ext)) return <FileText className="w-3.5 h-3.5 text-teal-400 shrink-0" />;
-    if (['sql'].includes(ext)) return <Database className="w-3.5 h-3.5 text-indigo-400 shrink-0" />;
-    if (['py'].includes(ext)) return <FileCode className="w-3.5 h-3.5 text-yellow-500 shrink-0" />;
+    if (['sql'].includes(ext)) return <Database className="w-3.5 h-3.5 text-blue-300 shrink-0" />;
+    if (['py'].includes(ext)) return <FileCode className="w-3.5 h-3.5 text-emerald-300 shrink-0" />;
     if (['sh', 'bash'].includes(ext)) return <Terminal className="w-3.5 h-3.5 text-green-400 shrink-0" />;
     return <File className="w-3.5 h-3.5 text-zinc-400 shrink-0" />;
   };
 
   const handleCreateFileSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newPathInput.trim()) return;
-    onCreateFile(newPathInput.trim(), '// FreshFood Cloud File\n');
+    const cleaned = newPathInput.trim().replace(/^\/+/, '');
+    if (!cleaned) return;
+    onCreateFile(cleaned, '');
     setNewPathInput('');
     setShowNewFileInput(false);
   };
 
   const handleCreateFolderSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newPathInput.trim()) return;
-    onCreateFolder(newPathInput.trim());
+    const cleaned = newPathInput.trim().replace(/^\/+|\/+$/g, '');
+    if (!cleaned) return;
+    onCreateFolder(cleaned);
     setNewPathInput('');
     setShowNewFolderInput(false);
   };
 
   const handleRenameSubmit = (fileId: string) => {
-    if (!renameInput.trim()) return;
-    onRenameFile(fileId, renameInput.trim());
+    const cleaned = renameInput.trim().replace(/^\/+/, '');
+    if (!cleaned) {
+      setRenamingId(null);
+      return;
+    }
+    onRenameFile(fileId, cleaned);
     setRenamingId(null);
     setRenameInput('');
   };
@@ -122,26 +146,81 @@ export const Sidebar: React.FC<SidebarProps> = ({
       const isCollapsed = Boolean(collapsedFolders[node.path]);
       const isFileActive = !isFolder && node.file && node.file.id === activeFileId;
       const isDirty = !isFolder && node.file?.isDirty;
+      const isUnloaded = !isFolder && node.file?.contentLoaded === false;
+      const deleteKey = isFolder ? `dir:${node.path}` : `file:${node.file?.id}`;
+      const isConfirmingDelete = confirmDeleteKey === deleteKey;
 
       if (isFolder) {
         return (
-          <div key={node.path} className="select-auto">
+          <div key={`dir-${node.path}`} className="select-auto">
             <div
               onClick={() => toggleFolder(node.path)}
               style={{ paddingLeft: `${depth * 14 + 10}px` }}
-              className="flex items-center gap-1.5 py-1 pr-2 hover:bg-zinc-800/60 cursor-pointer text-zinc-400 hover:text-zinc-200 text-xs group"
+              className="flex items-center justify-between py-1 pr-2 hover:bg-zinc-800/60 cursor-pointer text-zinc-400 hover:text-zinc-200 text-xs group"
             >
-              {isCollapsed ? (
-                <ChevronRight className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
-              ) : (
-                <ChevronDown className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
-              )}
-              {isCollapsed ? (
-                <Folder className="w-3.5 h-3.5 text-amber-400/80 shrink-0" />
-              ) : (
-                <FolderOpen className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-              )}
-              <span className="truncate font-medium text-zinc-300 text-[11.5px]">{node.name}</span>
+              <div className="flex items-center gap-1.5 truncate">
+                {isCollapsed ? (
+                  <ChevronRight className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                )}
+                {isCollapsed ? (
+                  <Folder className="w-3.5 h-3.5 text-blue-400/80 shrink-0" />
+                ) : (
+                  <FolderOpen className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                )}
+                <span className="truncate font-medium text-zinc-300 text-[11.5px]">{node.name}</span>
+              </div>
+
+              <div className="flex items-center gap-1 shrink-0">
+                {isConfirmingDelete ? (
+                  <div
+                    className="flex items-center gap-1"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <button
+                      onClick={() => {
+                        setConfirmDeleteKey(null);
+                        onDeleteFolder(node.path, node.file?.folderId);
+                      }}
+                      className="px-1.5 py-0.5 rounded bg-red-600 hover:bg-red-500 text-white text-[10px] font-semibold"
+                    >
+                      Delete
+                    </button>
+                    <button
+                      onClick={() => setConfirmDeleteKey(null)}
+                      className="px-1 py-0.5 rounded bg-zinc-700 text-zinc-200 text-[10px]"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity">
+                    <button
+                      onClick={e => {
+                        e.stopPropagation();
+                        setShowNewFileInput(true);
+                        setShowNewFolderInput(false);
+                        setNewPathInput(`${node.path}/`);
+                      }}
+                      className="p-1 hover:text-emerald-400 rounded hover:bg-zinc-700/60"
+                      title={`New file inside ${node.path}`}
+                    >
+                      <Plus className="w-3 h-3" />
+                    </button>
+                    <button
+                      onClick={e => {
+                        e.stopPropagation();
+                        setConfirmDeleteKey(deleteKey);
+                      }}
+                      className="p-1 hover:text-red-400 rounded hover:bg-zinc-700/60"
+                      title="Delete folder"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
 
             {!isCollapsed && node.children && node.children.length > 0 && (
@@ -187,43 +266,66 @@ export const Sidebar: React.FC<SidebarProps> = ({
               ? 'bg-emerald-950/40 text-emerald-300 font-medium border-l-2 border-emerald-400'
               : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'
           }`}
-          title={`${file.path} (${file.cloudProvider})`}
+          title={`${file.path} (${file.cloudProvider})${isUnloaded ? ' — Click to fetch via H2_READ_FILE_REQ' : ''}`}
         >
           <div className="flex items-center gap-1.5 truncate">
             {getFileIcon(file.name)}
-            <span className="truncate font-mono text-[11.5px]">{node.name}</span>
+            <span className={`truncate font-mono text-[11.5px] ${isUnloaded ? 'text-zinc-400' : ''}`}>
+              {node.name}
+            </span>
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
             {isDirty && (
-              <span className="w-2 h-2 rounded-full bg-amber-400" title="Unsaved" />
+              <span className="w-2 h-2 rounded-full bg-red-400" title="Unsaved changes" />
             )}
-            {/* Quick action buttons on hover */}
-            <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity">
-              <button
-                onClick={e => {
-                  e.stopPropagation();
-                  setRenamingId(file.id);
-                  setRenameInput(file.path);
-                }}
-                className="p-1 hover:text-white rounded hover:bg-zinc-700/60"
-                title="Rename file"
+
+            {isConfirmingDelete ? (
+              <div
+                className="flex items-center gap-1"
+                onClick={e => e.stopPropagation()}
               >
-                <Edit2 className="w-3 h-3" />
-              </button>
-              <button
-                onClick={e => {
-                  e.stopPropagation();
-                  if (confirm(`Delete ${file.name}?`)) {
+                <button
+                  onClick={() => {
+                    setConfirmDeleteKey(null);
                     onDeleteFile(file.id);
-                  }
-                }}
-                className="p-1 hover:text-red-400 rounded hover:bg-zinc-700/60"
-                title="Delete file"
-              >
-                <Trash2 className="w-3 h-3" />
-              </button>
-            </div>
+                  }}
+                  className="px-1.5 py-0.5 rounded bg-red-600 hover:bg-red-500 text-white text-[10px] font-semibold"
+                >
+                  Delete
+                </button>
+                <button
+                  onClick={() => setConfirmDeleteKey(null)}
+                  className="px-1 py-0.5 rounded bg-zinc-700 text-zinc-200 text-[10px]"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity">
+                <button
+                  onClick={e => {
+                    e.stopPropagation();
+                    setRenamingId(file.id);
+                    setRenameInput(file.path);
+                  }}
+                  className="p-1 hover:text-white rounded hover:bg-zinc-700/60"
+                  title="Rename file"
+                >
+                  <Edit2 className="w-3 h-3" />
+                </button>
+                <button
+                  onClick={e => {
+                    e.stopPropagation();
+                    setConfirmDeleteKey(deleteKey);
+                  }}
+                  className="p-1 hover:text-red-400 rounded hover:bg-zinc-700/60"
+                  title="Delete file"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
+            )}
           </div>
         </div>
       );
@@ -234,14 +336,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
     <aside className="w-64 h-full bg-[#1b1b1e] border-r border-zinc-800 flex flex-col select-auto shrink-0">
       {/* Workspace Cloud Header */}
       <div className="p-3 border-b border-zinc-800/80 bg-zinc-900/40">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5 truncate">
             <HardDrive className="w-4 h-4 text-emerald-400 shrink-0" />
             <span className="font-semibold text-zinc-200 text-xs truncate">
               {workspaceName}
             </span>
           </div>
-          <span className="px-1.5 py-0.2 rounded text-[10px] font-mono normal-case bg-emerald-950 text-emerald-400 border border-emerald-500/30">
+          <span className="px-1.5 py-0.2 rounded text-[10px] font-mono normal-case bg-emerald-950 text-emerald-400 border border-emerald-500/30 shrink-0">
             {cloudProvider}
           </span>
         </div>
@@ -249,7 +351,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Toolbar: New File, New Folder, Upload, Download */}
         <div className="flex items-center justify-between mt-2 pt-2 border-t border-zinc-800/60 text-zinc-400">
           <span className="text-[10px] normal-case font-bold tracking-wider text-zinc-400">
-            Files ({files.length})
+            Files ({fileCount})
           </span>
           <div className="flex items-center gap-1">
             <button
@@ -259,7 +361,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 setNewPathInput('');
               }}
               className="p-1 hover:bg-zinc-800 hover:text-white rounded text-zinc-400 transition"
-              title="New File"
+              title="New File (supports nested paths e.g. src/utils/new.ts)"
             >
               <Plus className="w-3.5 h-3.5" />
             </button>
@@ -311,11 +413,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* Inline New File / Folder input */}
       {showNewFileInput && (
         <form onSubmit={handleCreateFileSubmit} className="p-2 border-b border-zinc-800 bg-zinc-900">
-          <div className="text-[10px] text-emerald-400 font-mono mb-1">Create new file:</div>
+          <div className="text-[10px] text-emerald-400 font-mono mb-1">Create new file (nested paths allowed):</div>
           <div className="flex items-center gap-1">
             <input
               type="text"
-              placeholder="e.g. src/utils/math.ts"
+              placeholder="e.g. src/utils/new.ts"
               value={newPathInput}
               onChange={e => setNewPathInput(e.target.value)}
               autoFocus
@@ -340,7 +442,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {showNewFolderInput && (
         <form onSubmit={handleCreateFolderSubmit} className="p-2 border-b border-zinc-800 bg-zinc-900">
-          <div className="text-[10px] text-amber-400 font-mono mb-1">Create new directory:</div>
+          <div className="text-[10px] text-blue-400 font-mono mb-1">Create new directory:</div>
           <div className="flex items-center gap-1">
             <input
               type="text"
@@ -348,11 +450,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
               value={newPathInput}
               onChange={e => setNewPathInput(e.target.value)}
               autoFocus
-              className="flex-1 bg-zinc-950 border border-amber-500/60 rounded px-2 py-1 text-xs text-white outline-none font-mono"
+              className="flex-1 bg-zinc-950 border border-blue-500/60 rounded px-2 py-1 text-xs text-white outline-none font-mono"
             />
             <button
               type="submit"
-              className="px-2 py-1 bg-amber-500 text-black text-xs font-semibold rounded"
+              className="px-2 py-1 bg-blue-600 text-white text-xs font-semibold rounded"
             >
               Add
             </button>

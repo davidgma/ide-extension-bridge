@@ -1,17 +1,55 @@
-export type CloudProvider = 'pCloud' | 'Google Drive' | 'Dropbox' | 'OneDrive' | 'Box' | 'Local Workspace';
+/**
+ * Core TypeScript definitions for Monarch IDE & Clockie H2 Bridge Protocol v1.1 (H2_CLOUD_BRIDGE).
+ *
+ * Official Documentation:
+ * - TypeScript Handbook: https://www.typescriptlang.org/docs/
+ * - Window.postMessage API: https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage
+ */
+
+export type CloudProvider = string;
 
 export type ExtensionStatus = 'connected' | 'disconnected' | 'connecting';
 
+export interface H2Capabilities {
+  lazyRead?: boolean;
+  save?: boolean;
+  createFiles?: boolean;
+  createFolders?: boolean;
+  deleteFiles?: boolean;
+  deleteFolders?: boolean;
+  trashByDefault?: boolean;
+}
+
 export interface CloudFile {
+  /** Stable client-side key for React rendering and open tabs */
   id: string;
-  name: string;
-  path: string; // e.g. "src/index.ts"
-  content: string;
-  isDirectory?: boolean;
+  /** Remote cloud file ID from H2_WORKSPACE_TREE / H2_SAVE_FILE_RES (undefined for newly created unsaved files) */
+  cloudFileId?: string;
+  /** Remote cloud folder ID when item is a directory */
+  folderId?: string;
+  /** Remote parent folder ID */
   parentId?: string;
+  /** Parent folder relative path (e.g. "src" or "") */
+  parentRelativePath?: string;
+  /** File or folder name (e.g. "index.ts") */
+  name: string;
+  /** Relative path within workspace root (e.g. "src/index.ts") */
+  path: string;
+  /** Text content or base64 content */
+  content: string;
+  /** True when H2_WORKSPACE_TREE metadata has been hydrated with file content via H2_READ_FILE_RES */
+  contentLoaded?: boolean;
+  /** True while an H2_READ_FILE_REQ is currently in flight */
+  isLoadingContent?: boolean;
+  /** Error message if lazy content loading failed */
+  loadError?: string;
+  isDirectory?: boolean;
   cloudProvider: CloudProvider;
   mimeType?: string;
+  contentType?: 'text' | 'binary';
+  encoding?: 'utf-8' | 'base64';
   size?: number;
+  modifiedMs?: number;
   lastModified?: string;
   isDirty?: boolean;
   isBinary?: boolean;
@@ -38,9 +76,19 @@ export interface OpenTab {
 export interface ExtensionHandshakeInfo {
   name: string;
   version: string;
-  extensionId?: string;
-  connectedAt?: string;
+  sessionId: string;
   provider: CloudProvider;
+  rootName?: string;
+  rootFolderId?: string;
+  launchedItemType?: 'folder' | 'file';
+  primaryRelativePath?: string;
+  capabilities?: H2Capabilities;
+  stats?: {
+    totalFolders: number;
+    totalFiles: number;
+    totalBytes: number;
+  };
+  connectedAt?: string;
   latencyMs?: number;
 }
 
@@ -51,17 +99,29 @@ export interface DispatchTargetInfo {
   protocol: string;
   port: string;
   postMessageTarget: string;
-  broadcastChannelName: string;
-  customEventNames: string[];
-  localStorageKey?: string;
-  chromeRuntimeAvailable: boolean;
+  sessionId: string | null;
 }
+
+export type H2MessageType =
+  | 'H2_HANDSHAKE_REQ'
+  | 'H2_HANDSHAKE_RES'
+  | 'H2_WORKSPACE_TREE'
+  | 'H2_WORKSPACE_TREE_ACK'
+  | 'H2_READ_FILE_REQ'
+  | 'H2_READ_FILE_RES'
+  | 'H2_SAVE_FILE_REQ'
+  | 'H2_SAVE_FILE_RES'
+  | 'H2_DELETE_FILE_REQ'
+  | 'H2_DELETE_FILE_RES'
+  | 'H2_SYSTEM_EVENT';
 
 export interface BridgeMessage {
   id: string;
   direction: 'incoming' | 'outgoing' | 'event';
-  type: string;
-  channel?: 'postMessage' | 'BroadcastChannel' | 'CustomEvent' | 'localStorage' | 'system';
+  type: H2MessageType | string;
+  requestId?: string;
+  sessionId?: string | null;
+  channel?: 'postMessage' | 'system';
   payload: any;
   response?: any;
   status?: 'sent' | 'received' | 'acknowledged' | 'error' | 'timeout';

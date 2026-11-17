@@ -1,10 +1,20 @@
+/**
+ * Bottom IDE Status Bar.
+ * Displays H2_CLOUD_BRIDGE v1.1 connection state, debugger/terminal toggles,
+ * toast notifications, cursor position, and active language badge.
+ *
+ * Official Documentation:
+ * - React: https://react.dev/reference/react
+ * - Lucide React Icons: https://lucide.dev/guide/packages/lucide-react
+ */
+
 import React from 'react';
-import { 
+import {
   Plug,
-  HardDrive, 
+  HardDrive,
   Terminal,
   Bell,
-  Bug
+  Bug,
 } from 'lucide-react';
 import { CloudFile, ExtensionStatus, ExtensionHandshakeInfo } from '../types/ide';
 import { getMonacoLanguage } from '../utils/fileSystem';
@@ -45,26 +55,27 @@ export const StatusBar: React.FC<StatusBarProps> = ({
 
   return (
     <footer className="h-6 bg-[#18181b] border-t border-zinc-800 flex items-center justify-between px-3 text-[11px] select-auto text-zinc-400 font-mono z-20">
-      {/* Left: Extension status & manual toggle */}
+      {/* Left: Extension status & controls */}
       <div className="flex items-center gap-3">
-        {/* Extension Bridge Manual Toggle */}
         <div className="flex items-center gap-1.5">
           {extensionStatus === 'connected' ? (
             <div className="flex items-center gap-1.5 text-emerald-400">
               <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
-              <span>Clockie Connected</span>
+              <span>
+                H2 v1.1 Connected{handshakeInfo?.provider ? ` (${handshakeInfo.provider})` : ''}
+              </span>
               <button
                 onClick={onStopBridge}
                 className="hover:text-red-300 text-[10px] text-zinc-400 underline ml-0.5 cursor-pointer"
-                title="Stop Extension Bridge"
+                title="Disconnect H2 Extension Bridge"
               >
                 [Stop]
               </button>
             </div>
           ) : extensionStatus === 'connecting' ? (
-            <div className="flex items-center gap-1.5 text-amber-400">
-              <span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />
-              <span>Connecting...</span>
+            <div className="flex items-center gap-1.5 text-blue-400">
+              <span className="w-2 h-2 rounded-full bg-blue-400 inline-block animate-pulse" />
+              <span>Connecting H2...</span>
               <button
                 onClick={onStopBridge}
                 className="hover:text-white text-[10px] underline ml-0.5 cursor-pointer"
@@ -77,41 +88,41 @@ export const StatusBar: React.FC<StatusBarProps> = ({
             <button
               onClick={onStartBridge}
               className="flex items-center gap-1 text-zinc-400 hover:text-emerald-300 transition cursor-pointer"
-              title="Click to start Clockie McClockface Extension bridge"
+              title="Start H2_CLOUD_BRIDGE v1.1 Handshake"
             >
               <Plug className="w-3 h-3 text-zinc-400" />
-              <span>Bridge: Stopped (Click to Start)</span>
+              <span>H2 Bridge: Disconnected</span>
             </button>
           )}
 
           <button
             onClick={onOpenBridgeModal}
-            className="text-zinc-500 hover:text-zinc-300 text-[10px] ml-1"
-            title="Inspect Extension Bridge Protocol"
+            className="text-zinc-500 hover:text-blue-300 text-[10px] ml-1"
+            title="Inspect H2_CLOUD_BRIDGE v1.1 Protocol & Session"
           >
-            [Protocol Docs]
+            [Protocol v1.1]
           </button>
         </div>
 
         {/* Toggle Debugger Drawer */}
         <button
           onClick={onToggleDebugger}
-          className={`flex items-center gap-1 px-2 py-0.2 rounded font-semibold text-[10.5px] transition ${
+          className={`flex items-center gap-1 px-2 py-0.5 rounded font-semibold text-[10.5px] transition ${
             isDebuggerOpen
-              ? 'bg-emerald-600 text-black shadow'
-              : 'bg-zinc-850 hover:bg-zinc-800 text-emerald-400 border border-emerald-500/30'
+              ? 'bg-emerald-600 text-white shadow'
+              : 'bg-zinc-900 hover:bg-zinc-800 text-emerald-400 border border-emerald-500/30'
           }`}
           title="Toggle Extension Communication Debug Log Drawer"
         >
           <Bug className="w-3 h-3" />
-          <span>Extension Debugger</span>
+          <span>Bridge Debugger</span>
         </button>
 
         {/* Toggle Output Console */}
         <button
           onClick={onToggleConsole}
-          className={`flex items-center gap-1 px-1.5 py-0.2 rounded text-[10.5px] transition ${
-            isConsoleOpen ? 'bg-zinc-800 text-emerald-400' : 'hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200'
+          className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10.5px] transition ${
+            isConsoleOpen ? 'bg-zinc-800 text-blue-400' : 'hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200'
           }`}
           title="Toggle Output Terminal Console"
         >
@@ -121,9 +132,9 @@ export const StatusBar: React.FC<StatusBarProps> = ({
 
         {/* Status notification toast */}
         {statusNotification && (
-          <div className="hidden md:flex items-center gap-1 text-zinc-300 bg-zinc-800/80 px-2 py-0.2 rounded border border-zinc-700/60">
-            <Bell className="w-2.5 h-2.5 text-emerald-400" />
-            <span className="truncate max-w-[240px]">{statusNotification}</span>
+          <div className="hidden md:flex items-center gap-1 text-zinc-200 bg-zinc-800/80 px-2 py-0.5 rounded border border-zinc-700/60">
+            <Bell className="w-2.5 h-2.5 text-blue-400" />
+            <span className="truncate max-w-[260px]">{statusNotification}</span>
           </div>
         )}
 
@@ -138,7 +149,6 @@ export const StatusBar: React.FC<StatusBarProps> = ({
 
       {/* Right: Editor metrics */}
       <div className="flex items-center gap-4">
-        {/* Cursor Position */}
         <div className="text-zinc-300">
           <span>Ln {cursorPos.line}, Col {cursorPos.col}</span>
           {selectionLength > 0 && (
@@ -146,18 +156,12 @@ export const StatusBar: React.FC<StatusBarProps> = ({
           )}
         </div>
 
-        {/* Indentation */}
+        <div className="hidden sm:block text-zinc-400">Spaces: 2</div>
         <div className="hidden sm:block text-zinc-400">
-          Spaces: 2
+          {activeFile?.encoding === 'base64' ? 'Base64' : 'UTF-8'}
         </div>
 
-        {/* Encoding */}
-        <div className="hidden sm:block text-zinc-400">
-          UTF-8
-        </div>
-
-        {/* Language */}
-        <div className="capitalize text-emerald-400 font-medium bg-zinc-900 px-1.5 py-0.2 rounded border border-zinc-800">
+        <div className="capitalize text-emerald-400 font-medium bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-800">
           {language}
         </div>
       </div>

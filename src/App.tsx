@@ -1,11 +1,18 @@
 /**
- * @license
- * SPDX-License-Identifier: Apache-2.0
+ * Main Application Entry & Workspace Orchestrator for FreshFood Rocks - Monarch IDE.
+ * Coordinates file state, open editor tabs, Monaco editor preferences, and
+ * Clockie H2 Bridge Protocol v1.1 (H2_CLOUD_BRIDGE) communication.
+ *
+ * Official Documentation:
+ * - React: https://react.dev/reference/react
+ * - Window.postMessage: https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage
+ * - FileReader Web API: https://developer.mozilla.org/en-US/docs/Web/API/FileReader
  */
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { CloudFile, CloudProvider, EditorTheme, OpenTab } from './types/ide';
-import { INITIAL_CLOUD_FILES } from './utils/fileSystem';
+import { INITIAL_CLOUD_FILES, inferMimeType } from './utils/fileSystem';
+import { H2SaveFileRes, H2DeleteFileRes } from './utils/h2BridgeClient';
 import { useExtensionBridge } from './hooks/useExtensionBridge';
 import { executeCode, RunResult } from './utils/codeRunner';
 import { Header } from './components/Header';
@@ -21,16 +28,15 @@ import { SearchWorkspaceModal } from './components/SearchWorkspaceModal';
 import { ShortcutsModal } from './components/ShortcutsModal';
 
 export default function App() {
-  // State: Workspace files
+  // State: Workspace files & cloud provider metadata
   const [files, setFiles] = useState<CloudFile[]>(INITIAL_CLOUD_FILES);
-  const [cloudProvider, setCloudProvider] = useState<CloudProvider>('pCloud');
+  const [cloudProvider, setCloudProvider] = useState<CloudProvider>('Standalone');
   const [workspaceName, setWorkspaceName] = useState('FreshFood Vault');
 
-  // State: Tabs
+  // State: Open tabs
   const [openTabs, setOpenTabs] = useState<OpenTab[]>([
     { fileId: 'file-readme', path: 'README.md', title: 'README.md', previewMode: 'split' },
     { fileId: 'file-engine-ts', path: 'src/api/freshfood-engine.ts', title: 'freshfood-engine.ts', previewMode: 'code' },
-    { fileId: 'file-logo-svg', path: 'assets/freshfood-logo.svg', title: 'freshfood-logo.svg', previewMode: 'code' },
   ]);
   const [activeTabId, setActiveTabId] = useState<string | null>('file-readme');
 
@@ -40,26 +46,26 @@ export default function App() {
   const [minimap, setMinimap] = useState(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
-  // State: Cursor
+  // State: Cursor telemetry
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
   const [selectionLength, setSelectionLength] = useState(0);
 
-  // State: Code Execution
+  // State: Code execution
   const [consoleResult, setConsoleResult] = useState<RunResult | null>(null);
   const [isConsoleOpen, setIsConsoleOpen] = useState(false);
   const [isRunningCode, setIsRunningCode] = useState(false);
 
-  // State: Extension Debugger Drawer
+  // State: Extension Debugger drawer & modals
   const [isDebuggerOpen, setIsDebuggerOpen] = useState(false);
-
-  // State: Modals & Notification
   const [isBridgeModalOpen, setIsBridgeModalOpen] = useState(false);
   const [isQuickOpenOpen, setIsQuickOpenOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [statusNotification, setStatusNotification] = useState<string | null>(null);
 
-  // Notification helper
+  const readCloudFileRef = useRef<((file: CloudFile) => Promise<void>) | null>(null);
+
+  // Status toast helper
   const notify = useCallback((msg: string) => {
     setStatusNotification(msg);
     setTimeout(() => {
@@ -67,110 +73,241 @@ export default function App() {
     }, 3500);
   }, []);
 
-  // Extension Bridge Hook
+  // Clockie H2 Bridge Protocol v1.1 (H2_CLOUD_BRIDGE) hook
   const {
+    sessionId,
     extensionStatus,
     handshakeInfo,
     messagesLog,
     isSaving,
     startBridge,
     stopBridge,
+    readCloudFile,
     saveCloudFile,
     saveAllCloudFiles,
-    testSaveRequest,
-    simulateHandshake,
-    simulateLoadPreset,
+    deleteCloudItem,
     clearLogs,
   } = useExtensionBridge({
-    onFilesLoaded: (incomingFiles, provider, newWorkspaceName) => {
-      if (incomingFiles.length === 0) return;
+    onWorkspaceTreeLoaded: (incomingItems, provider, rootName, primaryRelativePath) => {
+      const primaryFile = primaryRelativePath
+        ? incomingItems.find(item => !item.isDirectory && item.path === primaryRelativePath)
+        : undefined;
 
-      setFiles(prevFiles => {
-        const updated = [...prevFiles];
-        for (const inc of incomingFiles) {
-          const existingIdx = updated.findIndex(f => f.path === inc.path || f.id === inc.id);
-          if (existingIdx >= 0) {
-            updated[existingIdx] = { ...updated[existingIdx], ...inc };
+      // Replace standalone demo workspace with live metadata tree from extension
+      const hydratedList = primaryFile
+        ? incomingItems.map(item =>
+            item.id === primaryFile.id
+              ? { ...item, isLoadingContent: true, loadError: undefined }
+              : item
+          )
+        : incomingItems;
+
+      setFiles(hydratedList);
+      setCloudProvider(provider);
+      setWorkspaceName(rootName || 'Cloud Workspace');
+
+      if (primaryFile) {
+        setOpenTabs([
+          {
+            fileId: primaryFile.id,
+            path: primaryFile.path,
+            title: primaryFile.name,
+            previewMode: 'split',
+          },
+        ]);
+        setActiveTabId(primaryFile.id);
+        readCloudFileRef.current?.(primaryFile);
+      } else {
+        setOpenTabs([]);
+        setActiveTabId(null);
+      }
+
+      const fileCount = incomingItems.filter(i => !i.isDirectory).length;
+      const folderCount = incomingItems.filter(i => i.isDirectory).length;
+      notify(`Loaded ${fileCount} files, ${folderCount} folders from ${provider}`);
+    },
+
+    onFileContentLoaded: (relativePath, updatedFields) => {
+      setFiles(prev =>
+        prev.map(f =>
+          !f.isDirectory && f.path === relativePath ? { ...f, ...updatedFields } : f
+        )
+      );
+    },
+
+    onFileContentLoadError: (relativePath, error) => {
+      setFiles(prev =>
+        prev.map(f =>
+          !f.isDirectory && f.path === relativePath
+            ? { ...f, isLoadingContent: false, loadError: error }
+            : f
+        )
+      );
+      notify(`Failed to load ${relativePath}: ${error}`);
+    },
+
+    onFileSaveConfirmed: (localId, res: H2SaveFileRes) => {
+      setFiles(prev =>
+        prev.map(f =>
+          f.id === localId
+            ? {
+                ...f,
+                cloudFileId: res.fileId ?? f.cloudFileId,
+                parentId: res.parentFolderId ?? f.parentId,
+                path: res.relativePath || f.path,
+                name: res.filename || f.name,
+                size: res.sizeBytes ?? f.size,
+                modifiedMs: res.modifiedMs ?? f.modifiedMs,
+                lastModified: res.modifiedMs
+                  ? new Date(res.modifiedMs).toLocaleTimeString()
+                  : new Date().toLocaleTimeString(),
+                isDirty: false,
+              }
+            : f
+        )
+      );
+      setOpenTabs(prev =>
+        prev.map(t =>
+          t.fileId === localId
+            ? {
+                ...t,
+                path: res.relativePath || t.path,
+                title: res.filename || t.title,
+                isDirty: false,
+              }
+            : t
+        )
+      );
+      notify(`Saved ${res.filename || res.relativePath} to ${res.provider || cloudProvider}`);
+    },
+
+    onFileSaveError: (_localId, error) => {
+      notify(`Save error: ${error}`);
+    },
+
+    onItemDeleted: (itemType, relativePath, res: H2DeleteFileRes) => {
+      const removedIds = new Set<string>();
+      setFiles(prev => {
+        const next: CloudFile[] = [];
+        for (const item of prev) {
+          const isMatch =
+            itemType === 'folder'
+              ? item.path === relativePath || item.path.startsWith(`${relativePath}/`)
+              : item.path === relativePath || (Boolean(res.fileId) && item.cloudFileId === res.fileId);
+          if (isMatch) {
+            removedIds.add(item.id);
           } else {
-            updated.push(inc);
+            next.push(item);
           }
         }
-        return updated;
+        return next;
       });
 
-      if (provider) setCloudProvider(provider);
-      if (newWorkspaceName) setWorkspaceName(newWorkspaceName);
-
-      const primaryFile = incomingFiles[0];
       setOpenTabs(prevTabs => {
-        const exists = prevTabs.some(t => t.fileId === primaryFile.id || t.path === primaryFile.path);
-        if (exists) return prevTabs;
-        return [...prevTabs, { fileId: primaryFile.id, path: primaryFile.path, title: primaryFile.name, previewMode: 'split' }];
+        const remaining = prevTabs.filter(
+          t =>
+            !removedIds.has(t.fileId) &&
+            !(itemType === 'folder' && (t.path === relativePath || t.path.startsWith(`${relativePath}/`))) &&
+            t.path !== relativePath
+        );
+        setActiveTabId(curr => {
+          if (!curr) return null;
+          const stillOpen = remaining.some(t => t.fileId === curr);
+          return stillOpen ? curr : remaining[remaining.length - 1]?.fileId ?? null;
+        });
+        return remaining;
       });
-      setActiveTabId(primaryFile.id);
 
-      notify(`Received ${primaryFile.name} from ${provider || 'Chrome Extension'}`);
+      notify(`${res.trashed ? 'Trashed' : 'Deleted'} ${relativePath}`);
     },
-    onFileSaveConfirmed: (fileId, timestamp) => {
-      setFiles(prev =>
-        prev.map(f => (f.id === fileId ? { ...f, isDirty: false, lastModified: new Date(timestamp).toLocaleTimeString() } : f))
-      );
-      const savedFile = files.find(f => f.id === fileId);
-      notify(`Saved ${savedFile?.name || 'file'} to ${savedFile?.cloudProvider || cloudProvider}`);
-    },
-    onFileSaveError: (fileId, error) => {
-      notify(`Save error: ${error}`);
+
+    onItemDeleteError: (relativePath, error) => {
+      notify(`Delete failed (${relativePath}): ${error}`);
     },
   });
 
-  const activeFile = useMemo(() => files.find(f => f.id === activeTabId) || null, [files, activeTabId]);
-  const activeTab = useMemo(() => openTabs.find(t => t.fileId === activeTabId), [openTabs, activeTabId]);
+  useEffect(() => {
+    readCloudFileRef.current = readCloudFile;
+  }, [readCloudFile]);
+
+  const activeFile = useMemo(
+    () => files.find(f => f.id === activeTabId && !f.isDirectory) || null,
+    [files, activeTabId]
+  );
+  const activeTab = useMemo(
+    () => openTabs.find(t => t.fileId === activeTabId),
+    [openTabs, activeTabId]
+  );
 
   const lineCount = useMemo(() => {
-    if (!activeFile || activeFile.isBinary) return 0;
+    if (!activeFile || activeFile.isBinary || activeFile.contentLoaded === false) return 0;
     return activeFile.content.split('\n').length;
-  }, [activeFile?.content, activeFile?.isBinary]);
+  }, [activeFile?.content, activeFile?.isBinary, activeFile?.contentLoaded]);
 
   const charCount = useMemo(() => {
-    if (!activeFile || activeFile.isBinary) return 0;
+    if (!activeFile || activeFile.isBinary || activeFile.contentLoaded === false) return 0;
     return activeFile.content.length;
-  }, [activeFile?.content, activeFile?.isBinary]);
+  }, [activeFile?.content, activeFile?.isBinary, activeFile?.contentLoaded]);
 
   const handleCursorChange = useCallback((pos: { line: number; col: number }, selLen: number) => {
     setCursorPos(prev => (prev.line === pos.line && prev.col === pos.col ? prev : pos));
     setSelectionLength(prev => (prev === selLen ? prev : selLen));
   }, []);
 
-  // File selection
-  const handleSelectFile = useCallback((fileId: string) => {
-    const file = files.find(f => f.id === fileId);
-    if (!file) return;
+  // File selection & lazy H2_READ_FILE_REQ hydration
+  const handleSelectFile = useCallback(
+    (fileId: string) => {
+      const file = files.find(f => f.id === fileId);
+      if (!file || file.isDirectory) return;
 
-    setOpenTabs(prev => {
-      const exists = prev.some(t => t.fileId === fileId);
-      if (exists) return prev;
-      return [...prev, { fileId: file.id, path: file.path, title: file.name, previewMode: 'split' }];
-    });
-    setActiveTabId(fileId);
-  }, [files]);
+      setOpenTabs(prev => {
+        const exists = prev.some(t => t.fileId === fileId);
+        if (exists) return prev;
+        return [...prev, { fileId: file.id, path: file.path, title: file.name, previewMode: 'split' }];
+      });
+      setActiveTabId(fileId);
+
+      if (file.contentLoaded === false && !file.isLoadingContent) {
+        setFiles(prev =>
+          prev.map(f => (f.id === fileId ? { ...f, isLoadingContent: true, loadError: undefined } : f))
+        );
+        readCloudFile(file);
+      }
+    },
+    [files, readCloudFile]
+  );
+
+  // Retry failed lazy load
+  const handleRetryLoadFile = useCallback(
+    (file: CloudFile) => {
+      setFiles(prev =>
+        prev.map(f => (f.id === file.id ? { ...f, isLoadingContent: true, loadError: undefined } : f))
+      );
+      readCloudFile(file);
+    },
+    [readCloudFile]
+  );
 
   // Tab close
-  const handleCloseTab = useCallback((fileId: string, e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    setOpenTabs(prev => {
-      const nextTabs = prev.filter(t => t.fileId !== fileId);
-      if (activeTabId === fileId) {
-        if (nextTabs.length > 0) {
-          const closedIdx = prev.findIndex(t => t.fileId === fileId);
-          const nextActive = nextTabs[Math.max(0, closedIdx - 1)];
-          setActiveTabId(nextActive.fileId);
-        } else {
-          setActiveTabId(null);
+  const handleCloseTab = useCallback(
+    (fileId: string, e?: React.MouseEvent) => {
+      e?.stopPropagation();
+      setOpenTabs(prev => {
+        const nextTabs = prev.filter(t => t.fileId !== fileId);
+        if (activeTabId === fileId) {
+          if (nextTabs.length > 0) {
+            const closedIdx = prev.findIndex(t => t.fileId === fileId);
+            const nextActive = nextTabs[Math.max(0, closedIdx - 1)];
+            setActiveTabId(nextActive.fileId);
+          } else {
+            setActiveTabId(null);
+          }
         }
-      }
-      return nextTabs;
-    });
-  }, [activeTabId]);
+        return nextTabs;
+      });
+    },
+    [activeTabId]
+  );
 
   const handleCloseAllTabs = useCallback(() => {
     setOpenTabs([]);
@@ -183,9 +320,7 @@ export default function App() {
   }, []);
 
   const handleSetPreviewMode = useCallback((fileId: string, mode: 'code' | 'split' | 'preview') => {
-    setOpenTabs(prev =>
-      prev.map(t => (t.fileId === fileId ? { ...t, previewMode: mode } : t))
-    );
+    setOpenTabs(prev => prev.map(t => (t.fileId === fileId ? { ...t, previewMode: mode } : t)));
   }, []);
 
   // Content edits
@@ -195,30 +330,33 @@ export default function App() {
     );
   }, []);
 
-  // Save current file (and automatically open debugger panel if save fails or is sent)
+  // Save current file
   const handleSaveCurrent = useCallback(() => {
     if (activeFile) {
       saveCloudFile(activeFile);
-      // Auto-open Debugger drawer on save so user immediately sees live outgoing message and response!
-      setIsDebuggerOpen(true);
     }
   }, [activeFile, saveCloudFile]);
 
-  // Save all files
+  // Save all dirty files
   const handleSaveAll = useCallback(() => {
-    const dirtyFiles = files.filter(f => f.isDirty);
+    const dirtyFiles = files.filter(f => !f.isDirectory && f.isDirty);
     if (dirtyFiles.length > 0) {
       saveAllCloudFiles(dirtyFiles);
-      setIsDebuggerOpen(true);
       notify(`Saving ${dirtyFiles.length} files to ${cloudProvider}...`);
     } else {
       notify('All files are up-to-date');
     }
   }, [files, saveAllCloudFiles, cloudProvider, notify]);
 
-  // Run Code
+  // Run Code (blocks if content has not been lazily loaded yet)
   const handleRunCode = useCallback(() => {
     if (!activeFile) return;
+    if (activeFile.contentLoaded === false) {
+      notify('Fetching file content before executing...');
+      handleRetryLoadFile(activeFile);
+      return;
+    }
+
     setIsRunningCode(true);
     setIsConsoleOpen(true);
     setTimeout(() => {
@@ -231,121 +369,247 @@ export default function App() {
         notify(`Execution error in ${activeFile.name}`);
       }
     }, 120);
-  }, [activeFile, notify]);
+  }, [activeFile, handleRetryLoadFile, notify]);
 
-  // Create new file
-  const handleCreateFile = useCallback((path: string, content = '') => {
-    const name = path.split('/').pop() || path;
-    const newFile: CloudFile = {
-      id: `file-${Date.now()}`,
-      name,
-      path,
-      content,
-      cloudProvider,
-      lastModified: new Date().toLocaleTimeString(),
-      isDirty: true,
-    };
-    setFiles(prev => [...prev, newFile]);
-    handleSelectFile(newFile.id);
-    notify(`Created ${name}`);
-  }, [cloudProvider, handleSelectFile, notify]);
+  // Create new file (supports nested relative paths like src/utils/new.ts via H2_SAVE_FILE_REQ)
+  const handleCreateFile = useCallback(
+    (rawPath: string, content = '') => {
+      const cleanPath = rawPath.replace(/^\/+|\/+$/g, '');
+      if (!cleanPath) return;
 
-  // Create new folder
-  const handleCreateFolder = useCallback((folderPath: string) => {
-    const placeholder: CloudFile = {
-      id: `file-${Date.now()}`,
-      name: '.gitkeep',
-      path: `${folderPath}/.gitkeep`,
-      content: '',
-      cloudProvider,
-      lastModified: new Date().toLocaleTimeString(),
-      isDirty: false,
-    };
-    setFiles(prev => [...prev, placeholder]);
-    notify(`Created directory ${folderPath}`);
-  }, [cloudProvider, notify]);
+      const parts = cleanPath.split('/');
+      const name = parts[parts.length - 1];
+      const parentRelativePath = parts.slice(0, -1).join('/');
 
-  // Delete file
-  const handleDeleteFile = useCallback((fileId: string) => {
-    setFiles(prev => prev.filter(f => f.id !== fileId));
-    handleCloseTab(fileId);
-    notify('File deleted');
-  }, [handleCloseTab, notify]);
+      const newFile: CloudFile = {
+        id: `file-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        name,
+        path: cleanPath,
+        parentRelativePath,
+        content,
+        contentLoaded: true,
+        mimeType: inferMimeType(name),
+        contentType: 'text',
+        encoding: 'utf-8',
+        cloudProvider,
+        lastModified: new Date().toLocaleTimeString(),
+        isDirty: extensionStatus !== 'connected',
+      };
 
-  // Rename file
-  const handleRenameFile = useCallback((fileId: string, newPath: string) => {
-    const newName = newPath.split('/').pop() || newPath;
-    setFiles(prev =>
-      prev.map(f => (f.id === fileId ? { ...f, path: newPath, name: newName, isDirty: true } : f))
-    );
-    setOpenTabs(prev =>
-      prev.map(t => (t.fileId === fileId ? { ...t, path: newPath, title: newName } : t))
-    );
-    notify(`Renamed to ${newName}`);
-  }, [notify]);
+      setFiles(prev => [...prev, newFile]);
+      setOpenTabs(prev => [
+        ...prev,
+        { fileId: newFile.id, path: newFile.path, title: newFile.name, previewMode: 'split' },
+      ]);
+      setActiveTabId(newFile.id);
 
-  // Upload files
-  const handleUploadFiles = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const fileList = e.target.files;
-    if (!fileList || fileList.length === 0) return;
+      if (extensionStatus === 'connected') {
+        saveCloudFile(newFile);
+      } else {
+        notify(`Created ${cleanPath}`);
+      }
+    },
+    [cloudProvider, extensionStatus, saveCloudFile, notify]
+  );
 
-    Array.from(fileList).forEach(f => {
-      const isImg = f.type.startsWith('image/');
-      const isVid = f.type.startsWith('video/');
+  // Create empty directory entry
+  const handleCreateFolder = useCallback(
+    (rawFolderPath: string) => {
+      const cleanPath = rawFolderPath.replace(/^\/+|\/+$/g, '');
+      if (!cleanPath) return;
 
-      if (isImg || isVid) {
-        const url = URL.createObjectURL(f);
-        const newFile: CloudFile = {
-          id: `upload-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-          name: f.name,
-          path: `uploads/${f.name}`,
+      const parts = cleanPath.split('/');
+      const name = parts[parts.length - 1];
+      const parentRelativePath = parts.slice(0, -1).join('/');
+
+      setFiles(prev => {
+        if (prev.some(item => item.isDirectory && item.path === cleanPath)) {
+          return prev;
+        }
+        const newFolder: CloudFile = {
+          id: `dir-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          name,
+          path: cleanPath,
+          parentRelativePath,
           content: '',
-          isBinary: true,
-          binaryUrl: url,
-          mimeType: f.type,
-          size: f.size,
+          contentLoaded: true,
+          isDirectory: true,
           cloudProvider,
           lastModified: new Date().toLocaleTimeString(),
         };
-        setFiles(prev => [...prev, newFile]);
-        handleSelectFile(newFile.id);
-      } else {
-        const reader = new FileReader();
-        reader.onload = evt => {
-          const text = (evt.target?.result as string) || '';
-          const newFile: CloudFile = {
-            id: `upload-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-            name: f.name,
-            path: `uploads/${f.name}`,
-            content: text,
-            cloudProvider,
-            lastModified: new Date().toLocaleTimeString(),
-            isDirty: true,
-          };
-          setFiles(prev => [...prev, newFile]);
-          handleSelectFile(newFile.id);
-        };
-        reader.readAsText(f);
-      }
-    });
+        return [...prev, newFolder];
+      });
+      notify(`Created folder ${cleanPath}`);
+    },
+    [cloudProvider, notify]
+  );
 
-    notify(`Imported ${fileList.length} files`);
-    e.target.value = '';
-  }, [cloudProvider, handleSelectFile, notify]);
+  // Delete file (dispatches H2_DELETE_FILE_REQ when bridge is connected)
+  const handleDeleteFile = useCallback(
+    (fileId: string) => {
+      const target = files.find(f => f.id === fileId && !f.isDirectory);
+      if (!target) return;
+
+      if (extensionStatus === 'connected') {
+        deleteCloudItem({
+          itemType: 'file',
+          relativePath: target.path,
+          fileId: target.cloudFileId,
+          permanent: false,
+        });
+      } else {
+        setFiles(prev => prev.filter(f => f.id !== fileId));
+        handleCloseTab(fileId);
+        notify(`Deleted ${target.path}`);
+      }
+    },
+    [files, extensionStatus, deleteCloudItem, handleCloseTab, notify]
+  );
+
+  // Delete folder & descendants (dispatches H2_DELETE_FILE_REQ when bridge is connected)
+  const handleDeleteFolder = useCallback(
+    (folderPath: string, folderId?: string) => {
+      const cleanPath = folderPath.replace(/^\/+|\/+$/g, '');
+      if (!cleanPath) return;
+
+      if (extensionStatus === 'connected') {
+        deleteCloudItem({
+          itemType: 'folder',
+          relativePath: cleanPath,
+          folderId,
+          permanent: false,
+        });
+      } else {
+        const removedIds = new Set(
+          files
+            .filter(f => f.path === cleanPath || f.path.startsWith(`${cleanPath}/`))
+            .map(f => f.id)
+        );
+        setFiles(prev => prev.filter(f => !removedIds.has(f.id)));
+        setOpenTabs(prev => prev.filter(t => !removedIds.has(t.fileId)));
+        if (activeTabId && removedIds.has(activeTabId)) {
+          setActiveTabId(null);
+        }
+        notify(`Deleted folder ${cleanPath}`);
+      }
+    },
+    [extensionStatus, deleteCloudItem, files, activeTabId, notify]
+  );
+
+  // Rename file locally (marks dirty so Cmd+S syncs to cloud path)
+  const handleRenameFile = useCallback(
+    (fileId: string, newPath: string) => {
+      const cleanPath = newPath.replace(/^\/+|\/+$/g, '');
+      if (!cleanPath) return;
+      const newName = cleanPath.split('/').pop() || cleanPath;
+      setFiles(prev =>
+        prev.map(f => (f.id === fileId ? { ...f, path: cleanPath, name: newName, isDirty: true } : f))
+      );
+      setOpenTabs(prev =>
+        prev.map(t => (t.fileId === fileId ? { ...t, path: cleanPath, title: newName } : t))
+      );
+      notify(`Renamed to ${newName}`);
+    },
+    [notify]
+  );
+
+  // Upload files from local disk
+  const handleUploadFiles = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const fileList = e.target.files;
+      if (!fileList || fileList.length === 0) return;
+
+      Array.from(fileList).forEach(f => {
+        const isImg = f.type.startsWith('image/') && !f.type.includes('svg');
+        const isVid = f.type.startsWith('video/');
+        const resolvedMime = f.type || inferMimeType(f.name);
+        const targetPath = `uploads/${f.name}`;
+
+        if (isImg || isVid) {
+          const reader = new FileReader();
+          reader.onload = evt => {
+            const dataUrl = (evt.target?.result as string) || '';
+            const commaIdx = dataUrl.indexOf(',');
+            const base64Content = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : '';
+            const newFile: CloudFile = {
+              id: `upload-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              name: f.name,
+              path: targetPath,
+              parentRelativePath: 'uploads',
+              content: base64Content,
+              contentLoaded: true,
+              isBinary: true,
+              contentType: 'binary',
+              encoding: 'base64',
+              binaryUrl: dataUrl,
+              mimeType: resolvedMime,
+              size: f.size,
+              cloudProvider,
+              lastModified: new Date().toLocaleTimeString(),
+              isDirty: true,
+            };
+            setFiles(prev => [...prev, newFile]);
+            setOpenTabs(prev => [
+              ...prev,
+              { fileId: newFile.id, path: newFile.path, title: newFile.name, previewMode: 'code' },
+            ]);
+            setActiveTabId(newFile.id);
+          };
+          reader.readAsDataURL(f);
+        } else {
+          const reader = new FileReader();
+          reader.onload = evt => {
+            const text = (evt.target?.result as string) || '';
+            const newFile: CloudFile = {
+              id: `upload-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              name: f.name,
+              path: targetPath,
+              parentRelativePath: 'uploads',
+              content: text,
+              contentLoaded: true,
+              contentType: 'text',
+              encoding: 'utf-8',
+              mimeType: resolvedMime,
+              size: f.size,
+              cloudProvider,
+              lastModified: new Date().toLocaleTimeString(),
+              isDirty: true,
+            };
+            setFiles(prev => [...prev, newFile]);
+            setOpenTabs(prev => [
+              ...prev,
+              { fileId: newFile.id, path: newFile.path, title: newFile.name, previewMode: 'split' },
+            ]);
+            setActiveTabId(newFile.id);
+          };
+          reader.readAsText(f);
+        }
+      });
+
+      notify(`Imported ${fileList.length} files`);
+      e.target.value = '';
+    },
+    [cloudProvider, notify]
+  );
 
   // Export workspace as JSON
   const handleExportWorkspace = useCallback(() => {
     const exportData = {
       workspace: workspaceName,
       domain: 'ide.freshfood.rocks',
+      protocol: 'H2_CLOUD_BRIDGE',
+      protocolVersion: '1.1',
       exportedAt: new Date().toISOString(),
       provider: cloudProvider,
-      files: files.map(f => ({
-        path: f.path,
-        name: f.name,
-        content: f.content,
-        cloudProvider: f.cloudProvider,
-      })),
+      files: files
+        .filter(f => !f.isDirectory)
+        .map(f => ({
+          path: f.path,
+          name: f.name,
+          contentLoaded: f.contentLoaded !== false,
+          content: f.content,
+          cloudProvider: f.cloudProvider,
+        })),
     };
     const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -393,6 +657,7 @@ export default function App() {
       <Header
         activeFile={activeFile}
         files={files}
+        sessionId={sessionId}
         extensionStatus={extensionStatus}
         handshakeInfo={handshakeInfo}
         isSaving={isSaving}
@@ -407,7 +672,7 @@ export default function App() {
         onToggleMinimap={() => setMinimap(!minimap)}
         onSaveCurrent={handleSaveCurrent}
         onSaveAll={handleSaveAll}
-        onStartBridge={startBridge}
+        onStartBridge={() => startBridge()}
         onStopBridge={stopBridge}
         onRunCode={handleRunCode}
         onOpenQuickOpen={() => setIsQuickOpenOpen(true)}
@@ -428,6 +693,7 @@ export default function App() {
             onCreateFile={handleCreateFile}
             onCreateFolder={handleCreateFolder}
             onDeleteFile={handleDeleteFile}
+            onDeleteFolder={handleDeleteFolder}
             onRenameFile={handleRenameFile}
             onUploadFiles={handleUploadFiles}
             onExportWorkspace={handleExportWorkspace}
@@ -440,7 +706,7 @@ export default function App() {
             openTabs={openTabs}
             activeTabId={activeTabId}
             files={files}
-            onSelectTab={setActiveTabId}
+            onSelectTab={handleSelectFile}
             onCloseTab={handleCloseTab}
             onCloseAllTabs={handleCloseAllTabs}
             onCloseOtherTabs={handleCloseOtherTabs}
@@ -457,6 +723,7 @@ export default function App() {
                 minimap={minimap}
                 onContentChange={handleContentChange}
                 onSaveFile={saveCloudFile}
+                onRetryLoadFile={handleRetryLoadFile}
                 onCursorChange={handleCursorChange}
                 onOpenQuickOpen={() => setIsQuickOpenOpen(true)}
                 onOpenBridgeModal={() => setIsBridgeModalOpen(true)}
@@ -465,16 +732,16 @@ export default function App() {
               />
             </div>
 
-            {/* Extension Debugger Log Panel */}
+            {/* Extension Debugger Drawer */}
             <ExtensionDebugger
               isOpen={isDebuggerOpen}
+              sessionId={sessionId}
               messagesLog={messagesLog}
               extensionStatus={extensionStatus}
               handshakeInfo={handshakeInfo}
               onClose={() => setIsDebuggerOpen(false)}
               onClearLogs={clearLogs}
-              onTestSaveRequest={testSaveRequest}
-              onPingExtension={startBridge}
+              onConnectWithSession={startBridge}
             />
 
             {/* Output / Terminal Drawer */}
@@ -500,7 +767,7 @@ export default function App() {
         handshakeInfo={handshakeInfo}
         isSaving={isSaving}
         statusNotification={statusNotification}
-        onStartBridge={startBridge}
+        onStartBridge={() => startBridge()}
         onStopBridge={stopBridge}
         onOpenBridgeModal={() => setIsBridgeModalOpen(true)}
         onToggleConsole={() => setIsConsoleOpen(prev => !prev)}
@@ -509,16 +776,16 @@ export default function App() {
         isDebuggerOpen={isDebuggerOpen}
       />
 
-      {/* Extension Bridge Console & Inspector Modal */}
+      {/* Extension Bridge Inspector Modal */}
       <ExtensionBridgeModal
         isOpen={isBridgeModalOpen}
         onClose={() => setIsBridgeModalOpen(false)}
+        sessionId={sessionId}
         extensionStatus={extensionStatus}
         handshakeInfo={handshakeInfo}
         messagesLog={messagesLog}
-        onSendPing={startBridge}
-        onSimulateHandshake={simulateHandshake}
-        onSimulateLoadPreset={simulateLoadPreset}
+        onStartBridge={startBridge}
+        onStopBridge={stopBridge}
         onClearLogs={clearLogs}
       />
 

@@ -1,116 +1,89 @@
+/**
+ * React hook managing the Clockie H2 Bridge Protocol v1.1 (H2_CLOUD_BRIDGE) lifecycle:
+ * 1. Reads #h2Session=<sessionId> (or ?h2Session=) on mount.
+ * 2. Performs Type 1a/1b handshake (H2_HANDSHAKE_REQ -> H2_HANDSHAKE_RES).
+ * 3. Receives Type 2 H2_WORKSPACE_TREE (metadata only) and replies with Type 3 H2_WORKSPACE_TREE_ACK.
+ * 4. Lazily reads individual file contents on demand via Type 4/5 (H2_READ_FILE_REQ -> H2_READ_FILE_RES).
+ * 5. Saves/creates files (including nested subdirectories) via Type 6/7 (H2_SAVE_FILE_REQ -> H2_SAVE_FILE_RES).
+ * 6. Deletes files and folders via Type 8/9 (H2_DELETE_FILE_REQ -> H2_DELETE_FILE_RES).
+ *
+ * Official Documentation:
+ * - React Hooks: https://react.dev/reference/react
+ * - Window.postMessage: https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage
+ */
+
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { CloudFile, CloudProvider, ExtensionStatus, ExtensionHandshakeInfo, BridgeMessage, DispatchTargetInfo } from '../types/ide';
+import {
+  CloudFile,
+  CloudProvider,
+  ExtensionStatus,
+  ExtensionHandshakeInfo,
+  BridgeMessage,
+  DispatchTargetInfo,
+} from '../types/ide';
+import {
+  H2BridgeClient,
+  H2WorkspaceTree,
+  H2SaveFileRes,
+  H2DeleteFileRes,
+  getH2SessionId,
+} from '../utils/h2BridgeClient';
+import { inferMimeType } from '../utils/fileSystem';
 
 interface UseExtensionBridgeProps {
-  onFilesLoaded?: (files: CloudFile[], provider?: CloudProvider, workspaceName?: string) => void;
-  onFileSaveConfirmed?: (fileId: string, timestamp: number) => void;
-  onFileSaveError?: (fileId: string, error: string) => void;
-}
-
-/**
- * Standard v1.0 Helper: Create SAVE_CLOUD_FILE payload conforming to spec
- */
-export function createV1SaveFilePayload(file: CloudFile, requestId?: string) {
-  const reqId = requestId || `req-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-
-  // 1. Raw file ID (strip 'file_' prefix if present, convert to number if purely digits)
-  let rawFileId: string | number = file.id;
-  if (typeof rawFileId === 'string' && rawFileId.startsWith('file_')) {
-    rawFileId = rawFileId.replace('file_', '');
-  }
-  if (typeof rawFileId === 'string' && /^\d+$/.test(rawFileId)) {
-    rawFileId = Number(rawFileId);
-  }
-
-  // 2. Parent Folder ID (strip 'folder_' prefix if present, convert to number if digits, default 0)
-  let rawParentFolderId: string | number = file.parentId ?? 0;
-  if (typeof rawParentFolderId === 'string' && rawParentFolderId.startsWith('folder_')) {
-    rawParentFolderId = rawParentFolderId.replace('folder_', '');
-  }
-  if (typeof rawParentFolderId === 'string' && /^\d+$/.test(rawParentFolderId)) {
-    rawParentFolderId = Number(rawParentFolderId);
-  }
-
-  // 3. Filename & Containing Folder Path ONLY
-  const rawPath = (file.path || file.name || 'file.txt').replace(/\\/g, '/');
-  const filename = file.name || rawPath.split('/').pop() || 'file.txt';
-
-  let folderPath = '/';
-  const lastSlashIndex = rawPath.lastIndexOf('/');
-  if (lastSlashIndex > 0) {
-    folderPath = rawPath.substring(0, lastSlashIndex);
-    if (!folderPath.startsWith('/')) {
-      folderPath = '/' + folderPath;
-    }
-  } else if (lastSlashIndex === 0) {
-    folderPath = '/';
-  } else {
-    folderPath = '/';
-  }
-
-  // 4. Provider (standardized lowercase string e.g. 'pcloud', 'gdrive', 'dropbox')
-  let providerStr = (file.cloudProvider || 'pcloud').toLowerCase().replace(/\s+/g, '');
-  if (providerStr === 'googledrive') providerStr = 'gdrive';
-
-  // 5. Binary/Text detection & encoding
-  const isBinary = Boolean(file.isBinary || file.binaryUrl || file.mimeType?.startsWith('image/') || file.mimeType?.startsWith('video/'));
-  const contentType: 'text' | 'binary' = isBinary ? 'binary' : 'text';
-  const encoding: 'utf-8' | 'base64' = isBinary ? 'base64' : 'utf-8';
-  const mimeType = file.mimeType || (isBinary ? 'application/octet-stream' : 'text/plain');
-
-  return {
-    source: 'FRESHFOOD_MONARCH_IDE',
-    action: 'SAVE_CLOUD_FILE',
-    requestId: reqId,
-    provider: providerStr,
-    fileId: rawFileId,
-    parentFolderId: rawParentFolderId,
-    filename,
-    path: folderPath,
-    contentType,
-    encoding,
-    mimeType,
-    content: file.content || '',
-  };
-}
-
-/**
- * Standard v1.0 Helper: Create PING_HANDSHAKE payload conforming to spec
- */
-export function createV1PingPayload(requestId?: string) {
-  return {
-    source: 'FRESHFOOD_MONARCH_IDE',
-    action: 'PING_HANDSHAKE',
-    requestId: requestId || `req-ping-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-  };
+  onWorkspaceTreeLoaded?: (
+    files: CloudFile[],
+    provider: CloudProvider,
+    rootName: string,
+    primaryRelativePath: string,
+    launchedItemType: 'folder' | 'file'
+  ) => void;
+  onFileContentLoaded?: (relativePath: string, updatedFields: Partial<CloudFile>) => void;
+  onFileContentLoadError?: (relativePath: string, error: string) => void;
+  onFileSaveConfirmed?: (localId: string, res: H2SaveFileRes) => void;
+  onFileSaveError?: (localId: string, error: string) => void;
+  onItemDeleted?: (itemType: 'file' | 'folder', relativePath: string, res: H2DeleteFileRes) => void;
+  onItemDeleteError?: (relativePath: string, error: string) => void;
 }
 
 export function useExtensionBridge({
-  onFilesLoaded,
+  onWorkspaceTreeLoaded,
+  onFileContentLoaded,
+  onFileContentLoadError,
   onFileSaveConfirmed,
   onFileSaveError,
+  onItemDeleted,
+  onItemDeleteError,
 }: UseExtensionBridgeProps = {}) {
+  const [sessionId, setSessionId] = useState<string | null>(() => getH2SessionId());
   const [extensionStatus, setExtensionStatus] = useState<ExtensionStatus>('disconnected');
   const [handshakeInfo, setHandshakeInfo] = useState<ExtensionHandshakeInfo | null>(null);
   const [messagesLog, setMessagesLog] = useState<BridgeMessage[]>([]);
   const [isSaving, setIsSaving] = useState(false);
-  const [isBridgeRunning, setIsBridgeRunning] = useState(false);
 
-  const pingTimeoutRef = useRef<number | null>(null);
-  const saveTimeoutRef = useRef<number | null>(null);
-  const saveStartTimeRef = useRef<Record<string, number>>({});
-  const isRunningRef = useRef(false);
-  const hasBootProcessedRef = useRef(false);
-  const lastProcessedPayloadHashRef = useRef<string>('');
+  const clientRef = useRef<H2BridgeClient | null>(null);
+  const hasBootedRef = useRef(false);
 
-  // Stable Refs for Callbacks
-  const onFilesLoadedRef = useRef(onFilesLoaded);
+  // Stable refs for parent callbacks
+  const onWorkspaceTreeLoadedRef = useRef(onWorkspaceTreeLoaded);
+  const onFileContentLoadedRef = useRef(onFileContentLoaded);
+  const onFileContentLoadErrorRef = useRef(onFileContentLoadError);
   const onFileSaveConfirmedRef = useRef(onFileSaveConfirmed);
   const onFileSaveErrorRef = useRef(onFileSaveError);
+  const onItemDeletedRef = useRef(onItemDeleted);
+  const onItemDeleteErrorRef = useRef(onItemDeleteError);
 
   useEffect(() => {
-    onFilesLoadedRef.current = onFilesLoaded;
-  }, [onFilesLoaded]);
+    onWorkspaceTreeLoadedRef.current = onWorkspaceTreeLoaded;
+  }, [onWorkspaceTreeLoaded]);
+
+  useEffect(() => {
+    onFileContentLoadedRef.current = onFileContentLoaded;
+  }, [onFileContentLoaded]);
+
+  useEffect(() => {
+    onFileContentLoadErrorRef.current = onFileContentLoadError;
+  }, [onFileContentLoadError]);
 
   useEffect(() => {
     onFileSaveConfirmedRef.current = onFileSaveConfirmed;
@@ -120,13 +93,24 @@ export function useExtensionBridge({
     onFileSaveErrorRef.current = onFileSaveError;
   }, [onFileSaveError]);
 
-  const getDispatchInfo = useCallback((): DispatchTargetInfo => {
-    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://ide.freshfood.rocks';
+  useEffect(() => {
+    onItemDeletedRef.current = onItemDeleted;
+  }, [onItemDeleted]);
+
+  useEffect(() => {
+    onItemDeleteErrorRef.current = onItemDeleteError;
+  }, [onItemDeleteError]);
+
+  const getDispatchInfo = useCallback((activeSid: string | null): DispatchTargetInfo => {
+    const origin =
+      typeof window !== 'undefined' ? window.location.origin : 'https://ide.freshfood.rocks';
     const url = typeof window !== 'undefined' ? window.location.href : 'https://ide.freshfood.rocks/';
     const host = typeof window !== 'undefined' ? window.location.host : 'ide.freshfood.rocks';
     const protocol = typeof window !== 'undefined' ? window.location.protocol : 'https:';
-    const port = typeof window !== 'undefined' ? (window.location.port || (protocol === 'https:' ? '443' : '80')) : '443';
-    const chromeRuntimeAvailable = Boolean(typeof window !== 'undefined' && (window as any).chrome?.runtime?.sendMessage);
+    const port =
+      typeof window !== 'undefined'
+        ? window.location.port || (protocol === 'https:' ? '443' : '80')
+        : '443';
 
     return {
       url,
@@ -134,508 +118,444 @@ export function useExtensionBridge({
       host,
       protocol,
       port,
-      postMessageTarget: `window.postMessage(envelope, '*') on origin '${origin}'`,
-      broadcastChannelName: 'CLOCKIE_MCCLOCKFACE_BRIDGE_CHANNEL',
-      customEventNames: ['SAVE_CLOUD_FILE', 'FRESHFOOD_MONARCH_SAVE', 'FRESHFOOD_MONARCH_IDE_EVENT'],
-      localStorageKey: 'FRESHFOOD_SAVE_REQUEST',
-      chromeRuntimeAvailable,
+      postMessageTarget: `window.postMessage(envelope, '${origin}')`,
+      sessionId: activeSid,
     };
   }, []);
 
-  // High precision log message helper
-  const logMessage = useCallback((
-    direction: 'incoming' | 'outgoing' | 'event',
-    type: string,
-    payload: any,
-    channel: 'postMessage' | 'BroadcastChannel' | 'CustomEvent' | 'localStorage' | 'system' = 'postMessage',
-    status: 'sent' | 'received' | 'acknowledged' | 'error' | 'timeout' = 'sent',
-    roundtripMs?: number,
-    response?: any,
-    overrideDispatchInfo?: DispatchTargetInfo
-  ) => {
-    const now = new Date();
-    const formattedTime = `${now.toLocaleTimeString([], { hour12: false })}.${String(now.getMilliseconds()).padStart(3, '0')}`;
-    const dispatchInfo = overrideDispatchInfo || getDispatchInfo();
+  const logMessage = useCallback(
+    (
+      direction: 'incoming' | 'outgoing' | 'event',
+      type: string,
+      payload: any,
+      status: 'sent' | 'received' | 'acknowledged' | 'error' | 'timeout' = 'sent',
+      roundtripMs?: number,
+      activeSid: string | null = null
+    ) => {
+      const now = new Date();
+      const formattedTime = `${now.toLocaleTimeString([], { hour12: false })}.${String(
+        now.getMilliseconds()
+      ).padStart(3, '0')}`;
 
-    const entry: BridgeMessage = {
-      id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-      direction,
-      type,
-      channel,
-      payload,
-      response,
-      status,
-      roundtripMs,
-      timestamp: Date.now(),
-      formattedTime,
-      dispatchInfo,
-    };
+      const entry: BridgeMessage = {
+        id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        direction,
+        type,
+        requestId: payload?.requestId,
+        sessionId: payload?.sessionId || activeSid,
+        channel: direction === 'event' ? 'system' : 'postMessage',
+        payload,
+        status,
+        roundtripMs,
+        timestamp: Date.now(),
+        formattedTime,
+        dispatchInfo: getDispatchInfo(payload?.sessionId || activeSid),
+      };
 
-    setMessagesLog(prev => [entry, ...prev.slice(0, 99)]); // Capped at 100 entries
-    return entry;
-  }, [getDispatchInfo]);
+      setMessagesLog(prev => [entry, ...prev.slice(0, 149)]);
+      return entry;
+    },
+    [getDispatchInfo]
+  );
 
   const logMessageRef = useRef(logMessage);
   useEffect(() => {
     logMessageRef.current = logMessage;
   }, [logMessage]);
 
-  // Stop bridge
-  const stopBridge = useCallback(() => {
-    if (pingTimeoutRef.current) window.clearTimeout(pingTimeoutRef.current);
-    if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
-    isRunningRef.current = false;
-    setIsBridgeRunning(false);
-    setExtensionStatus('disconnected');
-    setHandshakeInfo(null);
-    logMessageRef.current('outgoing', 'DISCONNECT_HANDSHAKE', {
-      source: 'FRESHFOOD_MONARCH_IDE',
-      action: 'DISCONNECT_HANDSHAKE',
-      reason: 'Bridge stopped by user'
-    }, 'system', 'sent');
-  }, []);
-
-  // Start bridge (PING_HANDSHAKE conforming to v1.0 spec)
-  const startBridge = useCallback(() => {
-    if (pingTimeoutRef.current) window.clearTimeout(pingTimeoutRef.current);
-    isRunningRef.current = true;
-    setIsBridgeRunning(true);
-    setExtensionStatus('connecting');
-
-    const pingEnvelope = createV1PingPayload();
-    logMessageRef.current('outgoing', 'PING_HANDSHAKE', pingEnvelope, 'postMessage', 'sent');
-    window.postMessage(pingEnvelope, '*');
-
-    pingTimeoutRef.current = window.setTimeout(() => {
-      if (isRunningRef.current && extensionStatus !== 'connected') {
-        setExtensionStatus('connected');
-        setHandshakeInfo({
-          name: 'FreshFood Chrome Extension v1.0',
-          version: '1.0.0',
-          provider: 'pCloud',
-          connectedAt: new Date().toLocaleTimeString(),
-          latencyMs: 12,
-        });
-        logMessageRef.current('incoming', 'PONG_HANDSHAKE', {
-          source: 'FRESHFOOD_EXTENSION',
-          action: 'PONG_HANDSHAKE',
-          requestId: pingEnvelope.requestId,
-          status: 'CONNECTED',
-          provider: 'pCloud'
-        }, 'postMessage', 'received');
-      }
-    }, 1200);
-  }, [extensionStatus]);
-
-  // Process incoming files payload
-  const processIncomingFilesPayload = useCallback((rawPayload: any, rawProvider?: CloudProvider) => {
-    if (!rawPayload) return;
-
-    const payloadString = typeof rawPayload === 'string' ? rawPayload : JSON.stringify(rawPayload);
-    if (lastProcessedPayloadHashRef.current === payloadString) {
-      return; // Ignore duplicate
-    }
-    lastProcessedPayloadHashRef.current = payloadString;
-
-    let filesData: any[] = [];
-    let provider: CloudProvider = rawProvider || 'pCloud';
-    let workspaceName = 'Cloud Extension Drive';
-    let parsed: any = rawPayload;
-
-    if (typeof rawPayload === 'string') {
-      try {
-        parsed = JSON.parse(rawPayload);
-      } catch {
-        parsed = { name: 'extension-file.txt', path: 'extension-file.txt', content: rawPayload };
-      }
+  const handleIncomingTree = useCallback((treeMsg: H2WorkspaceTree) => {
+    if (!treeMsg.success) {
+      logMessageRef.current(
+        'event',
+        'H2_WORKSPACE_TREE_ERROR',
+        { error: treeMsg.error || 'Workspace tree load failed', requestId: treeMsg.requestId },
+        'error',
+        undefined,
+        treeMsg.sessionId
+      );
+      return;
     }
 
-    if (Array.isArray(parsed)) {
-      filesData = parsed;
-    } else if (parsed.files && Array.isArray(parsed.files)) {
-      filesData = parsed.files;
-      provider = parsed.cloudProvider || parsed.provider || provider;
-      workspaceName = parsed.workspaceName || workspaceName;
-    } else if (parsed.fileList && Array.isArray(parsed.fileList)) {
-      filesData = parsed.fileList;
-      provider = parsed.cloudProvider || parsed.provider || provider;
-      workspaceName = parsed.workspaceName || workspaceName;
-    } else if (parsed.file && typeof parsed.file === 'object') {
-      filesData = [parsed.file];
-      provider = parsed.cloudProvider || parsed.provider || provider;
-    } else if (parsed.filename || parsed.name || parsed.path || parsed.content) {
-      filesData = [parsed];
-      provider = parsed.provider || parsed.cloudProvider || provider;
-    }
+    const provider = treeMsg.provider || 'cloud';
+    const rootName = treeMsg.rootName || 'Cloud Workspace';
+    const launchedItemType = treeMsg.launchedItemType || 'folder';
+    const primaryRelativePath = treeMsg.primaryRelativePath || '';
 
-    if (filesData.length === 0) return;
+    const folderItems: CloudFile[] = (treeMsg.folders || []).map(folder => ({
+      id: `dir-${folder.relativePath}`,
+      folderId: folder.folderId,
+      parentId: folder.parentFolderId,
+      parentRelativePath: folder.parentRelativePath,
+      name: folder.name,
+      path: folder.relativePath,
+      content: '',
+      contentLoaded: true,
+      isDirectory: true,
+      cloudProvider: provider,
+      modifiedMs: folder.modifiedMs,
+      lastModified: folder.modifiedMs ? new Date(folder.modifiedMs).toLocaleTimeString() : undefined,
+    }));
 
-    const formattedFiles: CloudFile[] = filesData.map((item, idx) => {
-      const rawName = item.filename || item.name || item.path?.split('/').pop() || `file-${idx}.txt`;
-      const rawFolderPath = item.path && item.path !== '/' ? item.path : '';
-      const fullPath = rawFolderPath ? `${rawFolderPath.replace(/\/$/, '')}/${rawName}` : rawName;
-
+    const fileItems: CloudFile[] = (treeMsg.files || []).map(file => {
+      const isBin = file.contentType === 'binary' || file.encoding === 'base64';
       return {
-        id: item.fileId ? String(item.fileId) : item.id ? String(item.id) : `ext-${Date.now()}-${idx}`,
-        name: rawName,
-        path: fullPath,
-        content: typeof item.content === 'string' ? item.content : typeof item.data === 'string' ? item.data : JSON.stringify(item.content || item.data || '', null, 2),
-        isDirectory: Boolean(item.isDirectory),
-        parentId: item.parentFolderId ? String(item.parentFolderId) : item.parentId ? String(item.parentId) : undefined,
-        cloudProvider: item.provider || item.cloudProvider || provider,
-        mimeType: item.mimeType,
-        size: item.size,
-        lastModified: item.lastModified || new Date().toLocaleTimeString(),
+        id: file.fileId ? String(file.fileId) : `h2-${file.relativePath}`,
+        cloudFileId: file.fileId,
+        parentId: file.parentFolderId,
+        parentRelativePath: file.parentRelativePath,
+        name: file.name,
+        path: file.relativePath,
+        content: '',
+        contentLoaded: false, // Metadata only; content will be fetched lazily via H2_READ_FILE_REQ
+        isLoadingContent: false,
+        isDirectory: false,
+        cloudProvider: provider,
+        mimeType: file.mimeType,
+        contentType: file.contentType,
+        encoding: file.encoding,
+        size: file.sizeBytes,
+        modifiedMs: file.modifiedMs,
+        lastModified: file.modifiedMs ? new Date(file.modifiedMs).toLocaleTimeString() : undefined,
+        isBinary: isBin,
         isDirty: false,
       };
     });
 
-    isRunningRef.current = true;
-    setIsBridgeRunning(true);
-    setExtensionStatus('connected');
-    setHandshakeInfo({
-      name: 'FreshFood Chrome Extension v1.0',
-      version: '1.0.0',
-      provider,
-      connectedAt: new Date().toLocaleTimeString(),
-      latencyMs: 4,
-    });
-
-    logMessageRef.current('incoming', 'LOAD_FILES_PAYLOAD', {
-      source: 'FRESHFOOD_EXTENSION',
-      action: 'LOAD_FILES_PAYLOAD',
-      provider,
-      filesCount: formattedFiles.length,
-      files: formattedFiles.map(f => f.path)
-    }, 'postMessage', 'received');
-
-    if (onFilesLoadedRef.current) {
-      onFilesLoadedRef.current(formattedFiles, provider, workspaceName);
-    }
-  }, []);
-
-  const processIncomingFilesPayloadRef = useRef(processIncomingFilesPayload);
-  useEffect(() => {
-    processIncomingFilesPayloadRef.current = processIncomingFilesPayload;
-  }, [processIncomingFilesPayload]);
-
-  // Save single file to cloud (Conforming to v1.0 SAVE_CLOUD_FILE spec)
-  const saveCloudFile = useCallback((file: CloudFile) => {
-    setIsSaving(true);
-    if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
-
-    const saveStartTime = performance.now();
-    const savePayload = createV1SaveFilePayload(file);
-
-    // Track startTime by raw fileId, string fileId, and requestId
-    saveStartTimeRef.current[file.id] = saveStartTime;
-    saveStartTimeRef.current[String(savePayload.fileId)] = saveStartTime;
-    saveStartTimeRef.current[savePayload.requestId] = saveStartTime;
-
-    logMessageRef.current('outgoing', 'SAVE_CLOUD_FILE', savePayload, 'postMessage', 'sent');
-
-    // 1. Primary v1.0 Dispatch Target: window.postMessage(envelope, '*')
-    window.postMessage(savePayload, '*');
-
-    // 2. Aux channels for dev tools and test harnesses
-    try {
-      window.dispatchEvent(new CustomEvent('SAVE_CLOUD_FILE', { detail: savePayload }));
-      window.dispatchEvent(new CustomEvent('FRESHFOOD_MONARCH_SAVE', { detail: savePayload }));
-    } catch {
-      // Ignored
-    }
-
-    try {
-      if (typeof BroadcastChannel !== 'undefined') {
-        const bc = new BroadcastChannel('CLOCKIE_MCCLOCKFACE_BRIDGE_CHANNEL');
-        bc.postMessage(savePayload);
-        bc.close();
-      }
-    } catch {
-      // Ignored
-    }
-
-    try {
-      localStorage.setItem('FRESHFOOD_SAVE_REQUEST', JSON.stringify(savePayload));
-    } catch {
-      // Ignored
-    }
-
-    // Direct extension runtime relay if injected in page
-    try {
-      if (typeof window !== 'undefined' && (window as any).chrome?.runtime?.sendMessage) {
-        (window as any).chrome.runtime.sendMessage(savePayload, (reply: any) => {
-          if (reply) {
-            logMessageRef.current('incoming', 'SAVE_DIRECT_ACK', reply, 'system', 'acknowledged');
-          }
-        });
-      }
-    } catch {
-      // Ignored
-    }
-
-    // Timeout safety net: If extension doesn't reply within 2.5s, log timeout warning
-    saveTimeoutRef.current = window.setTimeout(() => {
-      setIsSaving(false);
-      logMessageRef.current(
-        'event',
-        'SAVE_TIMEOUT_WARNING',
-        {
-          requestId: savePayload.requestId,
-          fileId: savePayload.fileId,
-          filename: savePayload.filename,
-          path: savePayload.path,
-          message: 'No SAVE_CLOUD_FILE_SUCCESS response received from FRESHFOOD_EXTENSION within 2.5 seconds.'
-        },
-        'system',
-        'timeout'
-      );
-
-      if (onFileSaveConfirmedRef.current) {
-        onFileSaveConfirmedRef.current(file.id, Date.now());
-      }
-    }, 2500);
-  }, []);
-
-  // Test Save Payload Trigger for Debugger
-  const testSaveRequest = useCallback(() => {
-    const sampleFile: CloudFile = {
-      id: '94739862628',
-      name: 'test1.txt',
-      path: '/Documents/Projects/test1.txt',
-      content: `Hello FreshFood Rocks Cloud Drive!\nUpdated at ${new Date().toISOString()}`,
-      cloudProvider: 'pCloud',
-      parentId: '12345',
-      lastModified: new Date().toLocaleTimeString(),
-      isDirty: true,
-    };
-    saveCloudFile(sampleFile);
-  }, [saveCloudFile]);
-
-  // Save all files
-  const saveAllCloudFiles = useCallback((files: CloudFile[]) => {
-    setIsSaving(true);
-    if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
-
-    files.forEach(file => {
-      saveCloudFile(file);
-    });
-
-    saveTimeoutRef.current = window.setTimeout(() => {
-      setIsSaving(false);
-    }, 2800);
-  }, [saveCloudFile]);
-
-  // Preset loader
-  const simulateLoadPreset = useCallback((preset: 'pcloud' | 'gdrive' | 'dropbox') => {
-    let providerName: CloudProvider = 'pCloud';
-    let sampleFiles: CloudFile[] = [];
-
-    if (preset === 'gdrive') {
-      providerName = 'Google Drive';
-      sampleFiles = [
-        {
-          id: '8837192',
-          name: 'freshfood-pipeline.py',
-          path: '/pipelines/freshfood-pipeline.py',
-          cloudProvider: 'Google Drive',
-          mimeType: 'text/x-python',
-          lastModified: new Date().toLocaleString(),
-          content: `# Synced from Google Drive (FreshFood Workspace)\nimport os\n\ndef run_pipeline():\n    print("Running Google Drive Synced Data Pipeline")\n\nif __name__ == "__main__":\n    run_pipeline()\n`
-        },
-        {
-          id: '8837193',
-          name: 'data-lake-config.json',
-          path: '/config/data-lake-config.json',
-          cloudProvider: 'Google Drive',
-          mimeType: 'application/json',
-          lastModified: new Date().toLocaleString(),
-          content: `{\n  "source": "Google Drive",\n  "bucket": "freshfood-production-lake",\n  "syncFrequency": "1m"\n}\n`
-        }
-      ];
-    } else if (preset === 'dropbox') {
-      providerName = 'Dropbox';
-      sampleFiles = [
-        {
-          id: '5549102',
-          name: 'dropbox-sync.ts',
-          path: '/sync/dropbox-sync.ts',
-          cloudProvider: 'Dropbox',
-          mimeType: 'application/typescript',
-          lastModified: new Date().toLocaleString(),
-          content: `// Synced from Dropbox Business Vault\nexport const dropboxClient = {\n  connected: true,\n  quota: '2TB',\n  syncStatus: 'synced'\n};\n`
-        }
-      ];
-    }
-
-    if (sampleFiles.length > 0) {
-      processIncomingFilesPayload(sampleFiles, providerName);
-    }
-  }, [processIncomingFilesPayload]);
-
-  // Simulation mode helper
-  const simulateHandshake = useCallback((connected = true, provider: CloudProvider = 'pCloud') => {
-    if (connected) {
-      isRunningRef.current = true;
-      setIsBridgeRunning(true);
-      const info: ExtensionHandshakeInfo = {
-        name: 'FreshFood Chrome Extension v1.0',
-        version: '1.0.0',
-        provider,
-        connectedAt: new Date().toLocaleTimeString(),
-        latencyMs: 14,
-      };
-      setExtensionStatus('connected');
-      setHandshakeInfo(info);
-      logMessageRef.current('incoming', 'PONG_HANDSHAKE', {
-        source: 'FRESHFOOD_EXTENSION',
-        action: 'PONG_HANDSHAKE',
-        status: 'OK',
-        provider,
-      }, 'postMessage', 'acknowledged', 14);
-    } else {
-      stopBridge();
-    }
-  }, [stopBridge]);
-
-  // Mounted ONCE on component boot
-  useEffect(() => {
-    if (!hasBootProcessedRef.current) {
-      hasBootProcessedRef.current = true;
-      try {
-        const params = new URLSearchParams(window.location.search);
-        const hashParams = new URLSearchParams(window.location.hash.replace('#', '?'));
-        const payloadStr = params.get('payload') || params.get('file') || params.get('data') ||
-                           hashParams.get('payload') || hashParams.get('file') || hashParams.get('data');
-
-        if (payloadStr) {
-          processIncomingFilesPayloadRef.current(payloadStr);
-          if (window.history && window.history.replaceState) {
-            window.history.replaceState({}, document.title, window.location.pathname);
-          }
-        }
-
-        const storedPayload = localStorage.getItem('FRESHFOOD_PENDING_FILE') || localStorage.getItem('CLOCKIE_PENDING_PAYLOAD');
-        if (storedPayload) {
-          localStorage.removeItem('FRESHFOOD_PENDING_FILE');
-          localStorage.removeItem('CLOCKIE_PENDING_PAYLOAD');
-          processIncomingFilesPayloadRef.current(storedPayload);
-        }
-      } catch (e) {
-        console.warn('Boot payload parse error:', e);
-      }
-    }
-
-    // Window Message Event Listener conforming to v1.0 response spec
-    const handleGlobalMessage = (event: MessageEvent) => {
-      if (!event.data || typeof event.data !== 'object') return;
-      if (event.data.source === 'FRESHFOOD_MONARCH_IDE') return; // Ignore messages dispatched by self
-
-      const source = event.data.source;
-      const isSpecExtension = source === 'FRESHFOOD_EXTENSION' || source === 'CLOCKIE_MCCLOCKFACE_EXT' || event.data.extensionId;
-
-      const action = event.data.action || event.data.type;
-      if (!action || typeof action !== 'string') return;
-
-      const VALID_ACTIONS = [
-        'PING_HANDSHAKE',
-        'PONG_HANDSHAKE',
-        'LOAD_FILES_PAYLOAD',
-        'SAVE_CLOUD_FILE_SUCCESS',
-        'SAVE_CLOUD_FILE_ERROR',
-        'DISCONNECT_HANDSHAKE'
-      ];
-
-      // Filter responses where event.data?.source === "FRESHFOOD_EXTENSION"
-      if (!isSpecExtension && !VALID_ACTIONS.includes(action)) return;
-
-      const fileId = event.data.fileId ?? event.data.payload?.fileId ?? event.data.id;
-      const requestId = event.data.requestId ?? event.data.payload?.requestId;
-
-      const startTime = (requestId && saveStartTimeRef.current[requestId]) || (fileId && saveStartTimeRef.current[String(fileId)]);
-      const roundtripMs = startTime ? Math.round(performance.now() - startTime) : undefined;
-
-      logMessageRef.current('incoming', action, event.data, 'postMessage', 'received', roundtripMs);
-
-      switch (action) {
-        case 'PONG_HANDSHAKE':
-        case 'PING_HANDSHAKE': {
-          isRunningRef.current = true;
-          setIsBridgeRunning(true);
-          setExtensionStatus('connected');
-          const extName = event.data.extensionName || event.data.name || 'FreshFood Extension v1.0';
-          const extVer = event.data.version || '1.0.0';
-          const provider: CloudProvider = (event.data.provider || event.data.cloudProvider || 'pCloud') as CloudProvider;
-          setHandshakeInfo({
-            name: extName,
-            version: extVer,
+    setHandshakeInfo(prev =>
+      prev
+        ? {
+            ...prev,
             provider,
+            rootName,
+            rootFolderId: treeMsg.rootFolderId,
+            launchedItemType,
+            primaryRelativePath,
+            stats: treeMsg.stats,
+          }
+        : {
+            name: 'Clockie H2 Extension',
+            version: treeMsg.protocolVersion || '1.1',
+            sessionId: treeMsg.sessionId,
+            provider,
+            rootName,
+            rootFolderId: treeMsg.rootFolderId,
+            launchedItemType,
+            primaryRelativePath,
+            stats: treeMsg.stats,
             connectedAt: new Date().toLocaleTimeString(),
-            latencyMs: roundtripMs || 8,
-          });
-          break;
-        }
-
-        case 'LOAD_FILES_PAYLOAD': {
-          processIncomingFilesPayloadRef.current(event.data.payload || event.data);
-          break;
-        }
-
-        case 'SAVE_CLOUD_FILE_SUCCESS': {
-          const timestamp = event.data.timestamp || Date.now();
-          setIsSaving(false);
-          if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
-          if (fileId !== undefined && onFileSaveConfirmedRef.current) {
-            onFileSaveConfirmedRef.current(String(fileId), timestamp);
           }
-          break;
-        }
+    );
 
-        case 'SAVE_CLOUD_FILE_ERROR': {
-          const errorMsg = event.data.error || event.data.message || 'Failed to save file to cloud provider';
-          setIsSaving(false);
-          if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
-          if (fileId !== undefined && onFileSaveErrorRef.current) {
-            onFileSaveErrorRef.current(String(fileId), errorMsg);
-          }
-          break;
-        }
+    if (onWorkspaceTreeLoadedRef.current) {
+      onWorkspaceTreeLoadedRef.current(
+        [...folderItems, ...fileItems],
+        provider,
+        rootName,
+        primaryRelativePath,
+        launchedItemType
+      );
+    }
+  }, []);
 
-        case 'DISCONNECT_HANDSHAKE': {
-          setExtensionStatus('disconnected');
-          setHandshakeInfo(null);
-          setIsBridgeRunning(false);
-          isRunningRef.current = false;
-          break;
-        }
+  const stopBridge = useCallback(() => {
+    if (clientRef.current) {
+      clientRef.current.destroy();
+      clientRef.current = null;
+    }
+    setExtensionStatus('disconnected');
+    setHandshakeInfo(null);
+    logMessageRef.current(
+      'event',
+      'H2_SYSTEM_EVENT',
+      { message: 'Extension bridge disconnected by user' },
+      'sent',
+      undefined,
+      sessionId
+    );
+  }, [sessionId]);
 
-        default:
-          break;
+  const startBridge = useCallback(
+    async (explicitSessionId?: string) => {
+      const targetSid = (explicitSessionId ?? getH2SessionId() ?? sessionId)?.trim() || null;
+
+      if (!targetSid) {
+        setExtensionStatus('disconnected');
+        logMessageRef.current(
+          'event',
+          'H2_SYSTEM_EVENT',
+          {
+            message:
+              'No h2Session parameter found in URL hash/search. Open this app from the Clockie H2 Chrome extension (#h2Session=<sessionId>) or provide a session ID in the Extension Bridge Debugger.',
+          },
+          'error',
+          undefined,
+          null
+        );
+        return;
       }
-    };
 
-    window.addEventListener('message', handleGlobalMessage);
+      if (clientRef.current) {
+        clientRef.current.destroy();
+        clientRef.current = null;
+      }
+
+      setSessionId(targetSid);
+      setExtensionStatus('connecting');
+
+      const client = new H2BridgeClient(targetSid, {
+        onOutgoing: (type, envelope) => {
+          logMessageRef.current('outgoing', type, envelope, 'sent', undefined, targetSid);
+        },
+        onIncoming: (type, envelope, roundtripMs) => {
+          const status = envelope?.success === false ? 'error' : 'received';
+          logMessageRef.current('incoming', type, envelope, status, roundtripMs, targetSid);
+        },
+        onTimeout: (type, requestId, errorMessage) => {
+          logMessageRef.current(
+            'event',
+            `${type}_TIMEOUT`,
+            { requestId, error: errorMessage, sessionId: targetSid },
+            'timeout',
+            undefined,
+            targetSid
+          );
+        },
+      });
+
+      client.onTree = handleIncomingTree;
+      clientRef.current = client;
+
+      try {
+        const startTs = performance.now();
+        const res = await client.handshake('FreshFood Rocks - Monarch IDE');
+        const latencyMs = Math.round(performance.now() - startTs);
+
+        if (res.success) {
+          setExtensionStatus('connected');
+          setHandshakeInfo({
+            name: 'Clockie H2 Extension',
+            version: res.negotiatedVersion || '1.1',
+            sessionId: targetSid,
+            provider: res.provider,
+            rootName: res.rootName,
+            launchedItemType: res.launchedItemType,
+            primaryRelativePath: res.primaryRelativePath,
+            capabilities: res.capabilities,
+            connectedAt: new Date().toLocaleTimeString(),
+            latencyMs,
+          });
+        } else {
+          setExtensionStatus('disconnected');
+        }
+      } catch (err: any) {
+        setExtensionStatus('disconnected');
+        logMessageRef.current(
+          'event',
+          'H2_HANDSHAKE_FAILED',
+          { sessionId: targetSid, error: err?.message || 'Handshake failed' },
+          'error',
+          undefined,
+          targetSid
+        );
+      }
+    },
+    [sessionId, handleIncomingTree]
+  );
+
+  // Perform automatic handshake on boot if #h2Session=<sessionId> is present
+  useEffect(() => {
+    if (!hasBootedRef.current) {
+      hasBootedRef.current = true;
+      const bootSid = getH2SessionId();
+      if (bootSid) {
+        startBridge(bootSid);
+      }
+    }
 
     return () => {
-      window.removeEventListener('message', handleGlobalMessage);
-      if (pingTimeoutRef.current) window.clearTimeout(pingTimeoutRef.current);
-      if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
+      if (clientRef.current) {
+        clientRef.current.destroy();
+        clientRef.current = null;
+      }
     };
+  }, [startBridge]);
+
+  // Type 4 / Type 5: Lazy file content read on open/demand
+  const readCloudFile = useCallback(
+    async (file: CloudFile, encodingOverride?: 'utf-8' | 'base64') => {
+      const client = clientRef.current;
+      if (!client) return;
+
+      const inferredEncoding: 'utf-8' | 'base64' | undefined =
+        encodingOverride || file.encoding || (file.isBinary ? 'base64' : 'utf-8');
+
+      try {
+        const res = await client.readFile(file.path, file.cloudFileId, inferredEncoding);
+        const isBinary = res.contentType === 'binary' || res.encoding === 'base64';
+        const resolvedMime = res.mimeType || file.mimeType || inferMimeType(file.name);
+
+        let binaryUrl: string | undefined;
+        if (isBinary && res.content) {
+          binaryUrl = res.content.startsWith('data:')
+            ? res.content
+            : `data:${resolvedMime || 'application/octet-stream'};base64,${res.content}`;
+        }
+
+        if (onFileContentLoadedRef.current) {
+          onFileContentLoadedRef.current(file.path, {
+            cloudFileId: res.fileId || file.cloudFileId,
+            parentId: res.parentFolderId || file.parentId,
+            name: res.filename || file.name,
+            mimeType: resolvedMime,
+            contentType: res.contentType,
+            encoding: res.encoding,
+            content: res.content ?? '',
+            size: res.sizeBytes,
+            modifiedMs: res.modifiedMs,
+            lastModified: res.modifiedMs
+              ? new Date(res.modifiedMs).toLocaleTimeString()
+              : new Date().toLocaleTimeString(),
+            isBinary,
+            binaryUrl,
+            contentLoaded: true,
+            isLoadingContent: false,
+            loadError: undefined,
+            isDirty: false,
+          });
+        }
+      } catch (err: any) {
+        if (onFileContentLoadErrorRef.current) {
+          onFileContentLoadErrorRef.current(file.path, err?.message || 'Failed to read file');
+        }
+      }
+    },
+    []
+  );
+
+  // Type 6 / Type 7: Save existing file or create new file (including nested subdirectories)
+  const saveCloudFile = useCallback(async (file: CloudFile) => {
+    const client = clientRef.current;
+    if (!client) {
+      logMessageRef.current(
+        'event',
+        'H2_SYSTEM_EVENT',
+        {
+          message: `Skipped H2_SAVE_FILE_REQ for "${file.path}": no active H2 bridge session.`,
+        },
+        'error'
+      );
+      if (onFileSaveErrorRef.current) {
+        onFileSaveErrorRef.current(file.id, 'Extension bridge is not connected');
+      }
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const isBinary = Boolean(file.isBinary);
+      let contentToSend = file.content || '';
+      // If binaryUrl was captured as a data URI during local upload and content is empty, extract base64
+      if (isBinary && !contentToSend && file.binaryUrl?.startsWith('data:')) {
+        const commaIdx = file.binaryUrl.indexOf(',');
+        if (commaIdx >= 0) {
+          contentToSend = file.binaryUrl.slice(commaIdx + 1);
+        }
+      }
+
+      const res = await client.saveFile({
+        relativePath: file.path,
+        fileId: file.cloudFileId,
+        mimeType: file.mimeType || inferMimeType(file.name),
+        contentType: isBinary ? 'binary' : 'text',
+        encoding: isBinary ? 'base64' : 'utf-8',
+        content: contentToSend,
+      });
+
+      if (onFileSaveConfirmedRef.current) {
+        onFileSaveConfirmedRef.current(file.id, res);
+      }
+    } catch (err: any) {
+      if (onFileSaveErrorRef.current) {
+        onFileSaveErrorRef.current(file.id, err?.message || 'Save failed');
+      }
+    } finally {
+      setIsSaving(false);
+    }
   }, []);
 
+  const saveAllCloudFiles = useCallback(
+    async (dirtyFiles: CloudFile[]) => {
+      if (!clientRef.current || dirtyFiles.length === 0) return;
+      setIsSaving(true);
+      try {
+        for (const f of dirtyFiles) {
+          await saveCloudFile(f);
+        }
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [saveCloudFile]
+  );
+
+  // Type 8 / Type 9: Delete file or folder
+  const deleteCloudItem = useCallback(
+    async ({
+      itemType,
+      relativePath,
+      fileId,
+      folderId,
+      permanent = false,
+    }: {
+      itemType: 'file' | 'folder';
+      relativePath: string;
+      fileId?: string;
+      folderId?: string;
+      permanent?: boolean;
+    }) => {
+      const client = clientRef.current;
+      if (!client) {
+        if (onItemDeleteErrorRef.current) {
+          onItemDeleteErrorRef.current(relativePath, 'Extension bridge is not connected');
+        }
+        return false;
+      }
+
+      try {
+        const res = await client.deleteItem({
+          itemType,
+          relativePath,
+          fileId,
+          folderId,
+          permanent,
+        });
+
+        if (onItemDeletedRef.current) {
+          onItemDeletedRef.current(itemType, res.relativePath || relativePath, res);
+        }
+        return true;
+      } catch (err: any) {
+        if (onItemDeleteErrorRef.current) {
+          onItemDeleteErrorRef.current(relativePath, err?.message || 'Delete failed');
+        }
+        return false;
+      }
+    },
+    []
+  );
+
   return {
+    sessionId,
     extensionStatus,
     handshakeInfo,
     messagesLog,
     isSaving,
-    isBridgeRunning,
     startBridge,
     stopBridge,
+    readCloudFile,
     saveCloudFile,
     saveAllCloudFiles,
-    testSaveRequest,
-    simulateHandshake,
-    simulateLoadPreset,
+    deleteCloudItem,
     clearLogs: () => setMessagesLog([]),
   };
 }

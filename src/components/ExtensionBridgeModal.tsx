@@ -1,183 +1,80 @@
+/**
+ * Extension Bridge Inspector & Protocol v1.1 (H2_CLOUD_BRIDGE) Reference Modal.
+ * Displays real-time session diagnostics, negotiated capabilities, workspace stats,
+ * live message logs, and protocol specification without any mock presets.
+ *
+ * Official Documentation:
+ * - React: https://react.dev/reference/react
+ * - Window.postMessage: https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage
+ * - Lucide React Icons: https://lucide.dev/guide/packages/lucide-react
+ */
+
 import React, { useState } from 'react';
-import { 
-  X, 
-  Radio, 
-  Copy, 
-  Check, 
-  Trash2, 
-  HardDrive, 
+import {
+  X,
+  Radio,
+  Trash2,
   Terminal,
   RotateCw,
-  Code
+  ShieldCheck,
+  FileCode,
+  Plug,
 } from 'lucide-react';
-import { ExtensionStatus, ExtensionHandshakeInfo, BridgeMessage, CloudProvider } from '../types/ide';
+import { ExtensionStatus, ExtensionHandshakeInfo, BridgeMessage } from '../types/ide';
 
 interface ExtensionBridgeModalProps {
   isOpen: boolean;
   onClose: () => void;
+  sessionId: string | null;
   extensionStatus: ExtensionStatus;
   handshakeInfo: ExtensionHandshakeInfo | null;
   messagesLog: BridgeMessage[];
-  onSendPing: () => void;
-  onSimulateHandshake: (connected: boolean, provider?: CloudProvider) => void;
-  onSimulateLoadPreset: (preset: 'pcloud' | 'gdrive' | 'dropbox') => void;
+  onStartBridge: (explicitSessionId?: string) => void;
+  onStopBridge: () => void;
   onClearLogs: () => void;
 }
 
 export const ExtensionBridgeModal: React.FC<ExtensionBridgeModalProps> = ({
   isOpen,
   onClose,
+  sessionId,
   extensionStatus,
   handshakeInfo,
   messagesLog,
-  onSendPing,
-  onSimulateHandshake,
-  onSimulateLoadPreset,
+  onStartBridge,
+  onStopBridge,
   onClearLogs,
 }) => {
-  const [activeTab, setActiveTab] = useState<'console' | 'manifest' | 'contentScript' | 'backgroundScript'>('console');
-  const [copiedFile, setCopiedFile] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'status' | 'protocol'>('status');
+  const [manualSid, setManualSid] = useState('');
 
   if (!isOpen) return null;
 
-  const handleCopy = (text: string, label: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedFile(label);
-    setTimeout(() => setCopiedFile(null), 2000);
+  const capabilityEntries: Array<{ key: keyof NonNullable<ExtensionHandshakeInfo['capabilities']>; label: string }> = [
+    { key: 'lazyRead', label: 'Lazy Read' },
+    { key: 'save', label: 'Save Files' },
+    { key: 'createFiles', label: 'Create Files' },
+    { key: 'createFolders', label: 'Create Folders' },
+    { key: 'deleteFiles', label: 'Delete Files' },
+    { key: 'deleteFolders', label: 'Delete Folders' },
+    { key: 'trashByDefault', label: 'Trash by Default' },
+  ];
+
+  const protocolMessages = [
+    { type: 'Type 1a: H2_HANDSHAKE_REQ', direction: 'Web App -> Extension', desc: 'Initiates session handshake using h2Session from URL hash/search.' },
+    { type: 'Type 1b: H2_HANDSHAKE_RES', direction: 'Extension -> Web App', desc: 'Returns provider, rootName, primaryRelativePath, and capabilities.' },
+    { type: 'Type 2: H2_WORKSPACE_TREE', direction: 'Extension -> Web App', desc: 'Pushes workspace folder & file metadata only (no file contents).' },
+    { type: 'Type 3: H2_WORKSPACE_TREE_ACK', direction: 'Web App -> Extension', desc: 'Confirms receipt of workspace folder and file counts.' },
+    { type: 'Type 4/5: H2_READ_FILE_REQ / RES', direction: 'Bidirectional', desc: 'Lazily fetches utf-8 or base64 content when a file is opened.' },
+    { type: 'Type 6/7: H2_SAVE_FILE_REQ / RES', direction: 'Bidirectional', desc: 'Saves edits or creates files/subdirectories via relativePath.' },
+    { type: 'Type 8/9: H2_DELETE_FILE_REQ / RES', direction: 'Bidirectional', desc: 'Deletes or trashes individual files or folders.' },
+  ];
+
+  const handleReconnect = (e: React.FormEvent) => {
+    e.preventDefault();
+    const sid = manualSid.trim() || undefined;
+    onStartBridge(sid);
   };
-
-  const currentOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://ide.freshfood.rocks';
-
-  const extensionManifestCode = `{
-  "manifest_version": 3,
-  "name": "Clockie McClockface - FreshFood Cloud IDE Bridge",
-  "version": "2.4.1",
-  "description": "Bi-directional cloud drive sync bridge for ${currentOrigin}",
-  "permissions": [
-    "storage",
-    "activeTab"
-  ],
-  "host_permissions": [
-    "${currentOrigin}/*",
-    "https://ide.freshfood.rocks/*",
-    "http://localhost:*/*",
-    "http://127.0.0.1:*/*",
-    "https://api.pcloud.com/*"
-  ],
-  "background": {
-    "service_worker": "background.js"
-  },
-  "content_scripts": [
-    {
-      "matches": [
-        "${currentOrigin}/*",
-        "https://ide.freshfood.rocks/*",
-        "http://localhost:*/*",
-        "http://127.0.0.1:*/*"
-      ],
-      "js": ["content.js"],
-      "run_at": "document_start"
-    }
-  ]
-}`;
-
-  const extensionContentCode = `// FreshFood Chrome Extension v1.0 - Content Script (content.js)
-console.log("[FreshFood Extension] v1.0 Bridge content.js initialized");
-
-// 1. Relay SAVE_CLOUD_FILE / PING_HANDSHAKE from IDE page to Extension Background Worker
-window.addEventListener("message", (event) => {
-  if (event.data?.source === "FRESHFOOD_MONARCH_IDE") {
-    console.log("[FreshFood Content Script] Received IDE message:", event.data.action, event.data);
-
-    chrome.runtime.sendMessage(event.data, (response) => {
-      if (response) {
-        window.postMessage(response, "*");
-      }
-    });
-  }
-});
-
-// 2. Relay confirmation back from Extension Service Worker to IDE page
-chrome.runtime.onMessage.addListener((message) => {
-  window.postMessage(message, "*");
-});
-
-// Handshake broadcast on load
-window.postMessage({
-  source: "FRESHFOOD_EXTENSION",
-  action: "PONG_HANDSHAKE",
-  status: "ready",
-  version: "1.0.0"
-}, "*");
-`;
-
-  const extensionBackgroundCode = `// FreshFood Chrome Extension v1.0 - Service Worker (background.js)
-// Handles cloud drive API persistence for v1.0 SAVE_CLOUD_FILE spec
-
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message?.source === "FRESHFOOD_MONARCH_IDE") {
-    const { action, requestId, provider, fileId, parentFolderId, filename, path, contentType, encoding, mimeType, content } = message;
-
-    if (action === "SAVE_CLOUD_FILE") {
-      console.log(\`[FreshFood Worker] Saving \${filename} to \${provider} in \${path}\`, {
-        requestId, fileId, parentFolderId, contentType, encoding
-      });
-
-      saveToCloudProvider(provider, path, filename, content, contentType)
-        .then(() => {
-          const reply = {
-            source: "FRESHFOOD_EXTENSION",
-            action: "SAVE_CLOUD_FILE_SUCCESS",
-            requestId: requestId,
-            fileId: fileId,
-            filename: filename,
-            path: path,
-            timestamp: Date.now()
-          };
-
-          if (sender.tab?.id) {
-            chrome.tabs.sendMessage(sender.tab.id, reply);
-          }
-          sendResponse(reply);
-        })
-        .catch((err) => {
-          const errorReply = {
-            source: "FRESHFOOD_EXTENSION",
-            action: "SAVE_CLOUD_FILE_ERROR",
-            requestId: requestId,
-            fileId: fileId,
-            error: err.message
-          };
-          if (sender.tab?.id) {
-            chrome.tabs.sendMessage(sender.tab.id, errorReply);
-          }
-          sendResponse(errorReply);
-        });
-
-      return true; // Asynchronous response channel
-    }
-
-    if (action === "PING_HANDSHAKE") {
-      const pong = {
-        source: "FRESHFOOD_EXTENSION",
-        action: "PONG_HANDSHAKE",
-        requestId: requestId,
-        status: "OK",
-        provider: "pcloud"
-      };
-      if (sender.tab?.id) {
-        chrome.tabs.sendMessage(sender.tab.id, pong);
-      }
-      sendResponse(pong);
-    }
-  }
-});
-
-async function saveToCloudProvider(provider, path, filename, content, contentType) {
-  const fullFilePath = path === "/" ? "/" + filename : path + "/" + filename;
-  return chrome.storage.sync.set({ [fullFilePath]: content });
-}
-`;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
@@ -186,222 +83,233 @@ async function saveToCloudProvider(provider, path, filename, content, contentTyp
         <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 bg-zinc-900/80">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
-              <Radio className="w-5 h-5 animate-pulse" />
+              <Radio className="w-5 h-5" />
             </div>
             <div>
               <h2 className="text-base font-bold text-white flex items-center gap-2">
-                <span>Clockie McClockface Extension Bridge</span>
-                <span className="text-xs px-2 py-0.5 rounded-full font-mono bg-zinc-800 border border-zinc-700 text-zinc-300 font-normal">
-                  ide.freshfood.rocks
+                <span>Extension Bridge Inspector</span>
+                <span className="text-xs px-2 py-0.5 rounded-full font-mono bg-blue-950/70 border border-blue-500/40 text-blue-300 font-normal">
+                  H2_CLOUD_BRIDGE v1.1
                 </span>
               </h2>
               <p className="text-xs text-zinc-400">
-                Bi-directional cloud drive sync protocol for pCloud, Google Drive, & Dropbox.
+                Handshake-only session bridge over window.postMessage for cloud workspaces.
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
             className="p-1.5 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-white transition"
+            title="Close inspector"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Status & Simulation Banner */}
+        {/* Status Bar */}
         <div className="px-6 py-3 bg-zinc-900/40 border-b border-zinc-800 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border ${
-              extensionStatus === 'connected'
-                ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40'
-                : 'bg-amber-950/80 text-amber-300 border-amber-500/40'
-            }`}>
-              <span className={`w-2 h-2 rounded-full ${
-                extensionStatus === 'connected' ? 'bg-emerald-400 animate-ping' : 'bg-amber-400'
-              }`} />
+          <div className="flex flex-wrap items-center gap-3">
+            <div
+              className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium border ${
+                extensionStatus === 'connected'
+                  ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40'
+                  : extensionStatus === 'connecting'
+                  ? 'bg-blue-950/80 text-blue-300 border-blue-500/40'
+                  : 'bg-red-950/60 text-red-300 border-red-500/40'
+              }`}
+            >
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  extensionStatus === 'connected'
+                    ? 'bg-emerald-400'
+                    : extensionStatus === 'connecting'
+                    ? 'bg-blue-400 animate-pulse'
+                    : 'bg-red-400'
+                }`}
+              />
               <span>
                 {extensionStatus === 'connected'
-                  ? '🟢 Connected to Clockie McClockface Extension'
-                  : '🟡 Standalone Mode'}
+                  ? 'Connected to Extension'
+                  : extensionStatus === 'connecting'
+                  ? 'Performing Handshake...'
+                  : 'Disconnected'}
               </span>
             </div>
 
+            <span className="text-xs text-zinc-400 font-mono">
+              Session: <strong className="text-zinc-200">{sessionId || 'none'}</strong>
+            </span>
+
             {handshakeInfo && (
-              <span className="text-xs text-zinc-400 font-mono hidden sm:inline">
-                Provider: <strong className="text-emerald-400">{handshakeInfo.provider}</strong> | Latency: {handshakeInfo.latencyMs}ms
+              <span className="text-xs text-zinc-400 font-mono">
+                Provider: <strong className="text-emerald-400">{handshakeInfo.provider}</strong>
+                {typeof handshakeInfo.latencyMs === 'number' && (
+                  <span className="text-zinc-500"> | {handshakeInfo.latencyMs}ms</span>
+                )}
               </span>
             )}
           </div>
 
-          {/* Quick Simulation Toggles */}
           <div className="flex items-center gap-2">
-            {extensionStatus === 'connected' ? (
+            {extensionStatus === 'connected' || extensionStatus === 'connecting' ? (
               <button
-                onClick={() => onSimulateHandshake(false)}
-                className="px-2.5 py-1 text-xs rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 transition"
+                onClick={onStopBridge}
+                className="px-2.5 py-1 text-xs rounded bg-red-950/80 hover:bg-red-900 text-red-200 border border-red-700/60 transition"
               >
-                Switch to Standalone
+                Disconnect
               </button>
-            ) : (
-              <button
-                onClick={() => onSimulateHandshake(true, 'pCloud')}
-                className="px-2.5 py-1 text-xs rounded bg-emerald-600 hover:bg-emerald-500 text-black font-semibold transition"
-              >
-                Simulate Extension Connect
-              </button>
-            )}
+            ) : null}
 
             <button
-              onClick={onSendPing}
-              className="px-2.5 py-1 text-xs rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 transition flex items-center gap-1"
-              title="Broadcast PING_HANDSHAKE"
+              onClick={() => onStartBridge(manualSid.trim() || undefined)}
+              className="px-2.5 py-1 text-xs rounded bg-blue-600 hover:bg-blue-500 text-white font-medium transition flex items-center gap-1"
+              title="Send H2_HANDSHAKE_REQ"
             >
-              <RotateCw className="w-3 h-3 text-emerald-400" />
-              <span>Ping</span>
+              <RotateCw className="w-3 h-3" />
+              <span>Handshake</span>
             </button>
           </div>
         </div>
 
-        {/* Tab Navigation */}
-        <div className="flex items-center gap-1 px-6 pt-3 border-b border-zinc-800 bg-[#141416] text-xs overflow-x-auto">
+        {/* Tabs */}
+        <div className="flex items-center gap-1 px-6 pt-3 border-b border-zinc-800 bg-[#141416] text-xs">
           <button
-            onClick={() => setActiveTab('console')}
-            className={`px-4 py-2 border-b-2 font-medium transition shrink-0 ${
-              activeTab === 'console'
+            onClick={() => setActiveTab('status')}
+            className={`px-4 py-2 border-b-2 font-medium transition ${
+              activeTab === 'status'
                 ? 'border-emerald-500 text-emerald-400'
                 : 'border-transparent text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            Live Bridge Console & Presets ({messagesLog.length})
+            Session & Message Stream ({messagesLog.length})
           </button>
           <button
-            onClick={() => setActiveTab('manifest')}
-            className={`px-4 py-2 border-b-2 font-medium transition shrink-0 ${
-              activeTab === 'manifest'
-                ? 'border-emerald-500 text-emerald-400'
+            onClick={() => setActiveTab('protocol')}
+            className={`px-4 py-2 border-b-2 font-medium transition ${
+              activeTab === 'protocol'
+                ? 'border-blue-500 text-blue-400'
                 : 'border-transparent text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            manifest.json
-          </button>
-          <button
-            onClick={() => setActiveTab('contentScript')}
-            className={`px-4 py-2 border-b-2 font-medium transition shrink-0 ${
-              activeTab === 'contentScript'
-                ? 'border-emerald-500 text-emerald-400'
-                : 'border-transparent text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
-            content.js (Bridge Relay)
-          </button>
-          <button
-            onClick={() => setActiveTab('backgroundScript')}
-            className={`px-4 py-2 border-b-2 font-medium transition shrink-0 ${
-              activeTab === 'backgroundScript'
-                ? 'border-emerald-500 text-emerald-400'
-                : 'border-transparent text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
-            background.js (pCloud API Persistence)
+            Protocol v1.1 Specification
           </button>
         </div>
 
-        {/* Tab Body */}
+        {/* Body */}
         <div className="flex-1 overflow-y-auto p-6 bg-[#0f0f11]">
-          {activeTab === 'console' && (
+          {activeTab === 'status' && (
             <div className="space-y-5">
-              {/* Cloud Drive Test Payloads */}
-              <div className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/60">
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="text-xs font-semibold text-zinc-200 flex items-center gap-2">
-                    <HardDrive className="w-4 h-4 text-emerald-400" />
-                    <span>Simulate Cloud Drive Folder Payloads (LOAD_FILES_PAYLOAD)</span>
-                  </h4>
-                  <span className="text-[11px] text-zinc-500 font-mono">
-                    Tests tree hydration from remote storage
-                  </span>
+              {/* Attach Session ID Form */}
+              <form
+                onSubmit={handleReconnect}
+                className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/60 flex flex-wrap items-center gap-3"
+              >
+                <div className="flex items-center gap-2 text-xs text-zinc-300 font-medium">
+                  <Plug className="w-4 h-4 text-blue-400" />
+                  <span>Attach Session ID:</span>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                  <button
-                    onClick={() => onSimulateLoadPreset('pcloud')}
-                    className="p-3 rounded-lg border border-zinc-800 hover:border-emerald-500/50 bg-zinc-950/60 hover:bg-zinc-850 text-left transition group"
-                  >
-                    <div className="text-xs font-semibold text-white group-hover:text-emerald-400 flex items-center justify-between">
-                      <span>pCloud Vault</span>
-                      <span className="text-[10px] text-emerald-400 font-mono">pCloud</span>
-                    </div>
-                    <div className="text-[11px] text-zinc-400 mt-1">
-                      Full TypeScript & Python suite with Markdown & SVG assets
-                    </div>
-                  </button>
+                <input
+                  type="text"
+                  value={manualSid}
+                  onChange={e => setManualSid(e.target.value)}
+                  placeholder={sessionId || 'Paste h2Session ID from #h2Session=...'}
+                  className="flex-1 min-w-[200px] px-3 py-1.5 rounded bg-zinc-950 border border-zinc-700 text-xs font-mono text-white focus:outline-none focus:border-blue-500"
+                />
+                <button
+                  type="submit"
+                  className="px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition"
+                >
+                  Connect Session
+                </button>
+              </form>
 
-                  <button
-                    onClick={() => onSimulateLoadPreset('gdrive')}
-                    className="p-3 rounded-lg border border-zinc-800 hover:border-blue-500/50 bg-zinc-950/60 hover:bg-zinc-850 text-left transition group"
-                  >
-                    <div className="text-xs font-semibold text-white group-hover:text-blue-400 flex items-center justify-between">
-                      <span>Google Drive</span>
-                      <span className="text-[10px] text-blue-400 font-mono">GDrive</span>
+              {/* Capabilities & Stats */}
+              {handshakeInfo && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/50 space-y-2">
+                    <h4 className="text-xs font-semibold text-zinc-200 flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                      <span>Negotiated Capabilities</span>
+                    </h4>
+                    <div className="flex flex-wrap gap-1.5">
+                      {capabilityEntries.map(({ key, label }) => {
+                        const enabled = handshakeInfo.capabilities?.[key];
+                        return (
+                          <span
+                            key={key}
+                            className={`px-2 py-0.5 rounded text-[11px] font-mono border ${
+                              enabled
+                                ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/30'
+                                : 'bg-zinc-950 text-zinc-500 border-zinc-800'
+                            }`}
+                          >
+                            {label}: {enabled ? 'yes' : 'no'}
+                          </span>
+                        );
+                      })}
                     </div>
-                    <div className="text-[11px] text-zinc-400 mt-1">
-                      ETL Data pipeline scripts and remote configuration
-                    </div>
-                  </button>
+                  </div>
 
-                  <button
-                    onClick={() => onSimulateLoadPreset('dropbox')}
-                    className="p-3 rounded-lg border border-zinc-800 hover:border-indigo-500/50 bg-zinc-950/60 hover:bg-zinc-850 text-left transition group"
-                  >
-                    <div className="text-xs font-semibold text-white group-hover:text-indigo-400 flex items-center justify-between">
-                      <span>Dropbox</span>
-                      <span className="text-[10px] text-indigo-400 font-mono">Dropbox</span>
-                    </div>
-                    <div className="text-[11px] text-zinc-400 mt-1">
-                      Multi-region sync configuration and client module
-                    </div>
-                  </button>
+                  <div className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/50 space-y-1.5 text-xs font-mono text-zinc-300">
+                    <h4 className="font-sans font-semibold text-zinc-200 flex items-center gap-2 mb-2">
+                      <FileCode className="w-4 h-4 text-blue-400" />
+                      <span>Workspace Metadata</span>
+                    </h4>
+                    <div>Root: <span className="text-white">{handshakeInfo.rootName || '-'}</span></div>
+                    <div>Launched Type: <span className="text-blue-400">{handshakeInfo.launchedItemType || '-'}</span></div>
+                    {handshakeInfo.stats && (
+                      <div>
+                        Items:{' '}
+                        <span className="text-emerald-400">
+                          {handshakeInfo.stats.totalFolders} folders, {handshakeInfo.stats.totalFiles} files
+                        </span>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
+              )}
 
-              {/* Message Log */}
+              {/* Live Message Log */}
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2 text-xs font-semibold text-zinc-300">
                     <Terminal className="w-4 h-4 text-emerald-400" />
-                    <span>Real-Time Bridge Protocol Event Stream</span>
+                    <span>Real-Time Bridge Message Log</span>
                   </div>
                   <button
                     onClick={onClearLogs}
                     className="flex items-center gap-1 text-[11px] text-zinc-400 hover:text-red-400 transition"
                   >
                     <Trash2 className="w-3 h-3" />
-                    <span>Clear Stream</span>
+                    <span>Clear Log</span>
                   </button>
                 </div>
 
-                <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3 max-h-[260px] overflow-y-auto font-mono text-xs space-y-2">
+                <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3 max-h-[280px] overflow-y-auto font-mono text-xs space-y-2">
                   {messagesLog.length === 0 ? (
-                    <div className="text-zinc-600 text-center py-6 italic text-[11px]">
-                      No bridge messages recorded yet. Ping or save a file to see network events.
+                    <div className="text-zinc-500 text-center py-6 italic text-[11px]">
+                      No bridge messages recorded yet. Open this app with #h2Session=&lt;id&gt; or start a handshake.
                     </div>
                   ) : (
                     messagesLog.map(msg => (
                       <div
                         key={msg.id}
-                        className="p-2 rounded bg-zinc-900/80 border border-zinc-800/80 text-[11px] select-text"
+                        className="p-2.5 rounded bg-zinc-900/80 border border-zinc-800 text-[11px] select-text"
                       >
                         <div className="flex items-center justify-between text-zinc-400 pb-1 mb-1 border-b border-zinc-800/60">
-                          <span className={`px-1.5 py-0.2 rounded font-bold text-[9px] ${
-                            msg.direction === 'incoming'
-                              ? 'bg-blue-950 text-blue-400 border border-blue-500/30'
-                              : 'bg-emerald-950 text-emerald-400 border border-emerald-500/30'
-                          }`}>
+                          <span
+                            className={`px-1.5 py-0.5 rounded font-semibold text-[10px] ${
+                              msg.direction === 'incoming'
+                                ? 'bg-blue-950 text-blue-300 border border-blue-500/30'
+                                : msg.direction === 'outgoing'
+                                ? 'bg-emerald-950 text-emerald-300 border border-emerald-500/30'
+                                : 'bg-red-950 text-red-300 border border-red-500/30'
+                            }`}
+                          >
                             {msg.direction}
                           </span>
                           <span className="font-semibold text-white">{msg.type}</span>
-                          <span className="text-zinc-500 text-[10px]">
-                            {new Date(msg.timestamp).toLocaleTimeString()}
-                          </span>
+                          <span className="text-zinc-500 text-[10px]">{msg.formattedTime}</span>
                         </div>
                         <pre className="text-zinc-300 text-[10px] overflow-x-auto whitespace-pre-wrap">
                           {JSON.stringify(msg.payload, null, 2)}
@@ -414,97 +322,47 @@ async function saveToCloudProvider(provider, path, filename, content, contentTyp
             </div>
           )}
 
-          {activeTab === 'manifest' && (
-            <div className="relative">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs text-zinc-400 font-mono">manifest.json</span>
-                <button
-                  onClick={() => handleCopy(extensionManifestCode, 'manifest')}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs transition"
-                >
-                  {copiedFile === 'manifest' ? (
-                    <>
-                      <Check className="w-3 h-3 text-emerald-400" />
-                      <span className="text-emerald-400">Copied</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-3 h-3" />
-                      <span>Copy Code</span>
-                    </>
-                  )}
-                </button>
+          {activeTab === 'protocol' && (
+            <div className="space-y-4">
+              <div className="p-4 rounded-xl border border-blue-500/30 bg-blue-950/20 text-xs text-zinc-300 space-y-1.5">
+                <div className="font-semibold text-white">Envelope & Validation Rules (v1.1)</div>
+                <p>
+                  Launch URL format: <code className="text-emerald-300 font-mono">#h2Session=&lt;sessionId&gt;</code>
+                </p>
+                <p>
+                  Replies are accepted only when <code className="text-blue-300 font-mono">event.source === window</code>,{' '}
+                  <code className="text-blue-300 font-mono">protocol === "H2_CLOUD_BRIDGE"</code>,{' '}
+                  <code className="text-blue-300 font-mono">__h2FromExtension === true</code>, and{' '}
+                  <code className="text-blue-300 font-mono">sessionId</code> matches the active session.
+                </p>
               </div>
-              <pre className="p-4 rounded-xl bg-zinc-950 border border-zinc-800 text-emerald-400 font-mono text-xs overflow-x-auto select-text leading-relaxed">
-                <code>{extensionManifestCode}</code>
-              </pre>
-            </div>
-          )}
 
-          {activeTab === 'contentScript' && (
-            <div className="relative">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs text-zinc-400 font-mono">content.js</span>
-                <button
-                  onClick={() => handleCopy(extensionContentCode, 'content')}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs transition"
-                >
-                  {copiedFile === 'content' ? (
-                    <>
-                      <Check className="w-3 h-3 text-emerald-400" />
-                      <span className="text-emerald-400">Copied</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-3 h-3" />
-                      <span>Copy Code</span>
-                    </>
-                  )}
-                </button>
+              <div className="border border-zinc-800 rounded-xl overflow-hidden divide-y divide-zinc-800 bg-zinc-900/40">
+                {protocolMessages.map(item => (
+                  <div key={item.type} className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                    <div>
+                      <div className="font-mono font-semibold text-emerald-400">{item.type}</div>
+                      <div className="text-zinc-400 mt-0.5">{item.desc}</div>
+                    </div>
+                    <span className="px-2 py-0.5 rounded bg-zinc-950 border border-zinc-700 text-blue-300 font-mono text-[11px] shrink-0 self-start sm:self-center">
+                      {item.direction}
+                    </span>
+                  </div>
+                ))}
               </div>
-              <pre className="p-4 rounded-xl bg-zinc-950 border border-zinc-800 text-emerald-400 font-mono text-xs overflow-x-auto select-text leading-relaxed">
-                <code>{extensionContentCode}</code>
-              </pre>
-            </div>
-          )}
-
-          {activeTab === 'backgroundScript' && (
-            <div className="relative">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs text-zinc-400 font-mono">background.js (pCloud API Persistence)</span>
-                <button
-                  onClick={() => handleCopy(extensionBackgroundCode, 'background')}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs transition"
-                >
-                  {copiedFile === 'background' ? (
-                    <>
-                      <Check className="w-3 h-3 text-emerald-400" />
-                      <span className="text-emerald-400">Copied</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-3 h-3" />
-                      <span>Copy Code</span>
-                    </>
-                  )}
-                </button>
-              </div>
-              <pre className="p-4 rounded-xl bg-zinc-950 border border-zinc-800 text-emerald-400 font-mono text-xs overflow-x-auto select-text leading-relaxed">
-                <code>{extensionBackgroundCode}</code>
-              </pre>
             </div>
           )}
         </div>
 
         {/* Footer */}
         <div className="px-6 py-3 border-t border-zinc-800 bg-zinc-900/60 flex items-center justify-between text-xs text-zinc-400">
-          <div className="flex items-center gap-2">
-            <span>Handshake Protocol:</span>
-            <span className="text-emerald-400 font-mono font-semibold">PING_HANDSHAKE / LOAD_FILES_PAYLOAD / SAVE_CLOUD_FILE</span>
+          <div className="flex items-center gap-2 font-mono">
+            <span>Protocol:</span>
+            <span className="text-emerald-400 font-semibold">H2_CLOUD_BRIDGE v1.1</span>
           </div>
           <button
             onClick={onClose}
-            className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-black font-semibold transition"
+            className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold transition"
           >
             Done
           </button>
