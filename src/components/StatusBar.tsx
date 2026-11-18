@@ -1,7 +1,8 @@
 /**
  * Bottom IDE Status Bar.
- * Displays H2_CLOUD_BRIDGE v1.1 connection state, debugger/terminal toggles,
- * toast notifications, cursor position, and active language badge.
+ * Displays H2_CLOUD_BRIDGE v1.2 connection state, session mode (launched/direct),
+ * accessMode badge (readwrite/readonly), debugger/terminal toggles, toast notifications,
+ * cursor position, and active language badge.
  *
  * Official Documentation:
  * - React: https://react.dev/reference/react
@@ -15,6 +16,7 @@ import {
   Terminal,
   Bell,
   Bug,
+  Lock,
 } from 'lucide-react';
 import { CloudFile, ExtensionStatus, ExtensionHandshakeInfo } from '../types/ide';
 import { getMonacoLanguage } from '../utils/fileSystem';
@@ -26,6 +28,7 @@ interface StatusBarProps {
   extensionStatus: ExtensionStatus;
   handshakeInfo: ExtensionHandshakeInfo | null;
   isSaving: boolean;
+  isReadOnly: boolean;
   statusNotification: string | null;
   onStartBridge: () => void;
   onStopBridge: () => void;
@@ -42,6 +45,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   selectionLength,
   extensionStatus,
   handshakeInfo,
+  isReadOnly,
   statusNotification,
   onStartBridge,
   onStopBridge,
@@ -62,12 +66,19 @@ export const StatusBar: React.FC<StatusBarProps> = ({
             <div className="flex items-center gap-1.5 text-emerald-400">
               <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
               <span>
-                H2 v1.1 Connected{handshakeInfo?.provider ? ` (${handshakeInfo.provider})` : ''}
+                H2 v1.2 {handshakeInfo?.sessionMode || 'connected'}
+                {handshakeInfo?.provider ? ` (${handshakeInfo.provider})` : ''}
               </span>
+              {isReadOnly && (
+                <span className="flex items-center gap-0.5 text-red-300 px-1 rounded bg-red-950/60 border border-red-500/30 text-[10px]">
+                  <Lock className="w-2.5 h-2.5" />
+                  read-only
+                </span>
+              )}
               <button
                 onClick={onStopBridge}
                 className="hover:text-red-300 text-[10px] text-zinc-400 underline ml-0.5 cursor-pointer"
-                title="Disconnect H2 Extension Bridge"
+                title="Disconnect H2 Extension Bridge (H2_DISCONNECT_REQ)"
               >
                 [Stop]
               </button>
@@ -75,7 +86,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
           ) : extensionStatus === 'connecting' ? (
             <div className="flex items-center gap-1.5 text-blue-400">
               <span className="w-2 h-2 rounded-full bg-blue-400 inline-block animate-pulse" />
-              <span>Connecting H2...</span>
+              <span>Connecting H2 v1.2...</span>
               <button
                 onClick={onStopBridge}
                 className="hover:text-white text-[10px] underline ml-0.5 cursor-pointer"
@@ -88,7 +99,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
             <button
               onClick={onStartBridge}
               className="flex items-center gap-1 text-zinc-400 hover:text-emerald-300 transition cursor-pointer"
-              title="Start H2_CLOUD_BRIDGE v1.1 Handshake"
+              title="Connect H2_CLOUD_BRIDGE v1.2"
             >
               <Plug className="w-3 h-3 text-zinc-400" />
               <span>H2 Bridge: Disconnected</span>
@@ -98,9 +109,9 @@ export const StatusBar: React.FC<StatusBarProps> = ({
           <button
             onClick={onOpenBridgeModal}
             className="text-zinc-500 hover:text-blue-300 text-[10px] ml-1"
-            title="Inspect H2_CLOUD_BRIDGE v1.1 Protocol & Session"
+            title="Inspect H2_CLOUD_BRIDGE v1.2 Protocol & Session"
           >
-            [Protocol v1.1]
+            [Protocol v1.2]
           </button>
         </div>
 

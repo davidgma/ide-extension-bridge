@@ -1,6 +1,7 @@
 /**
  * Monaco Editor & Media/Markdown Workspace Area.
- * Supports lazy file loading states for H2_CLOUD_BRIDGE v1.1 (H2_READ_FILE_REQ).
+ * Supports lazy file loading states for H2_CLOUD_BRIDGE v1.2 (H2_READ_FILE_REQ)
+ * and read-only session enforcement (accessMode === "readonly").
  *
  * Official Documentation:
  * - Monaco Editor React: https://github.com/suren-atoyan/monaco-react
@@ -20,6 +21,7 @@ import {
   RotateCw,
   AlertTriangle,
   DownloadCloud,
+  Lock,
 } from 'lucide-react';
 
 interface EditorAreaProps {
@@ -28,6 +30,7 @@ interface EditorAreaProps {
   activeTheme: EditorTheme;
   wordWrap: boolean;
   minimap: boolean;
+  isReadOnly?: boolean;
   onContentChange: (fileId: string, newContent: string) => void;
   onSaveFile: (file: CloudFile) => void;
   onRetryLoadFile: (file: CloudFile) => void;
@@ -44,6 +47,7 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
   activeTheme,
   wordWrap,
   minimap,
+  isReadOnly = false,
   onContentChange,
   onSaveFile,
   onRetryLoadFile,
@@ -72,23 +76,19 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
     editorRef.current = editor;
     monacoRef.current = monaco;
 
-    // Register Monarch themes & custom tokens
     registerMonarchThemesAndLanguages(monaco);
     monaco.editor.setTheme(activeTheme);
 
-    // Keyboard shortcut for Cmd+S / Ctrl+S inside Monaco
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
       if (activeFileRef.current) {
         onSaveFileRef.current(activeFileRef.current);
       }
     });
 
-    // Quick open shortcut Cmd+P / Ctrl+P inside Monaco
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyP, () => {
       onOpenQuickOpen();
     });
 
-    // Track cursor movements and selection
     editor.onDidChangeCursorPosition(e => {
       onCursorChangeRef.current({ line: e.position.lineNumber, col: e.position.column }, 0);
     });
@@ -105,21 +105,20 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
     });
   };
 
-  // Sync theme changes
   useEffect(() => {
     if (monacoRef.current) {
       monacoRef.current.editor.setTheme(activeTheme);
     }
   }, [activeTheme]);
 
-  // If no file is open: Welcome Hero
+  // Welcome Hero when no file tab is open
   if (!activeFile) {
-    const recentFiles = files.filter(f => !f.isDirectory).slice(0, 5);
+    const recentFiles = files.filter(f => !f.isDirectory).slice(0, 6);
     return (
       <div className="h-full w-full flex flex-col items-center justify-center bg-[#18181b] p-6 text-center select-auto">
         <div className="max-w-md w-full space-y-6">
           <div className="mx-auto w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-500 to-blue-600 flex items-center justify-center shadow-2xl shadow-emerald-950/60">
-            <Radio className="w-8 h-8 text-black" />
+            <Radio className="w-8 h-8 text-white" />
           </div>
 
           <div>
@@ -130,7 +129,7 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
               Target Host: <span className="text-emerald-300">https://ide.freshfood.rocks</span>
             </p>
             <p className="text-xs text-zinc-400 mt-1">
-              H2 Cloud Bridge Protocol v1.1 (H2_CLOUD_BRIDGE)
+              H2 Cloud Bridge Protocol v1.2 (H2_CLOUD_BRIDGE)
             </p>
           </div>
 
@@ -154,11 +153,10 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
                 <Radio className="w-4 h-4 text-blue-400" />
                 <span>Bridge Protocol</span>
               </div>
-              <div className="text-[11px] text-zinc-500 mt-1 font-mono font-normal">Inspect v1.1</div>
+              <div className="text-[11px] text-zinc-500 mt-1 font-mono font-normal">Inspect v1.2</div>
             </button>
           </div>
 
-          {/* Quick file pickers from loaded files */}
           <div className="text-left bg-zinc-900/60 border border-zinc-800 rounded-xl p-3">
             <div className="text-[10px] font-bold text-zinc-500 font-mono tracking-wider mb-2">
               Workspace Files ({files.filter(f => !f.isDirectory).length})
@@ -166,7 +164,7 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
             <div className="space-y-1">
               {recentFiles.length === 0 ? (
                 <div className="text-xs text-zinc-500 py-2 italic">
-                  No files in current workspace.
+                  No files loaded yet. Expand a folder in the sidebar or select a connected drive.
                 </div>
               ) : (
                 recentFiles.map(file => (
@@ -192,7 +190,7 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
     );
   }
 
-  // Lazy load state: Currently fetching file via H2_READ_FILE_REQ
+  // Lazy load state
   if (activeFile.isLoadingContent) {
     return (
       <div className="h-full w-full flex flex-col items-center justify-center bg-[#18181b] p-6 text-center select-auto">
@@ -201,7 +199,7 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
           Fetching {activeFile.name}...
         </div>
         <div className="text-xs text-zinc-400 font-mono mt-1">
-          Sending H2_READ_FILE_REQ for {activeFile.path}
+          Sending H2_READ_FILE_REQ ({activeFile.cloudProvider}) for {activeFile.path}
         </div>
       </div>
     );
@@ -234,7 +232,7 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
         )}
         <button
           onClick={() => onRetryLoadFile(activeFile)}
-          className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-black font-semibold text-xs transition flex items-center gap-1.5"
+          className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition flex items-center gap-1.5"
         >
           <RotateCw className="w-3.5 h-3.5" />
           <span>Fetch File Content</span>
@@ -243,12 +241,10 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
     );
   }
 
-  // Handle binary media files
   if (isImageFile(activeFile.name) || isVideoFile(activeFile.name)) {
     return <MediaViewer file={activeFile} />;
   }
 
-  // Handle Markdown files with preview or split modes
   const isMd = isMarkdownFile(activeFile.name);
   const previewMode = activeTab?.previewMode || 'split';
 
@@ -259,44 +255,58 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
   const language = getMonacoLanguage(activeFile.name);
 
   return (
-    <div className="h-full w-full flex overflow-hidden bg-[#18181b]">
-      {/* Code Editor */}
-      <div className={`h-full ${isMd && previewMode === 'split' ? 'w-1/2 border-r border-zinc-800' : 'w-full'}`}>
-        <Editor
-          height="100%"
-          language={language}
-          value={activeFile.content}
-          theme={activeTheme}
-          onMount={handleEditorMount}
-          onChange={val => onContentChange(activeFile.id, val || '')}
-          options={{
-            fontSize: 13.5,
-            fontFamily: "'Fira Code', 'Consolas', 'Monaco', monospace",
-            fontLigatures: true,
-            tabSize: 2,
-            minimap: { enabled: minimap },
-            wordWrap: wordWrap ? 'on' : 'off',
-            automaticLayout: true,
-            lineNumbers: 'on',
-            scrollBeyondLastLine: false,
-            smoothScrolling: true,
-            cursorBlinking: 'smooth',
-            cursorSmoothCaretAnimation: 'on',
-            renderWhitespace: 'selection',
-            bracketPairColorization: { enabled: true },
-            guides: { bracketPairs: true, indentation: true },
-            contextmenu: true,
-            padding: { top: 12, bottom: 12 },
-          }}
-        />
-      </div>
-
-      {/* Markdown Live Preview on right (Split mode) */}
-      {isMd && previewMode === 'split' && (
-        <div className="h-full w-1/2 overflow-hidden bg-[#141416]">
-          <MarkdownViewer content={activeFile.content} filename={activeFile.name} />
+    <div className="h-full w-full flex flex-col overflow-hidden bg-[#18181b]">
+      {isReadOnly && (
+        <div className="px-3 py-1 bg-red-950/60 border-b border-red-500/30 text-red-200 text-[11px] flex items-center gap-2 shrink-0">
+          <Lock className="w-3 h-3 text-red-400" />
+          <span>Read-only session active — editing and saving are disabled by the extension.</span>
         </div>
       )}
+
+      <div className="flex-1 min-h-0 flex overflow-hidden">
+        {/* Code Editor */}
+        <div className={`h-full ${isMd && previewMode === 'split' ? 'w-1/2 border-r border-zinc-800' : 'w-full'}`}>
+          <Editor
+            height="100%"
+            language={language}
+            value={activeFile.content}
+            theme={activeTheme}
+            onMount={handleEditorMount}
+            onChange={val => {
+              if (!isReadOnly) {
+                onContentChange(activeFile.id, val || '');
+              }
+            }}
+            options={{
+              readOnly: isReadOnly,
+              fontSize: 13.5,
+              fontFamily: "'Fira Code', 'Consolas', 'Monaco', monospace",
+              fontLigatures: true,
+              tabSize: 2,
+              minimap: { enabled: minimap },
+              wordWrap: wordWrap ? 'on' : 'off',
+              automaticLayout: true,
+              lineNumbers: 'on',
+              scrollBeyondLastLine: false,
+              smoothScrolling: true,
+              cursorBlinking: 'smooth',
+              cursorSmoothCaretAnimation: 'on',
+              renderWhitespace: 'selection',
+              bracketPairColorization: { enabled: true },
+              guides: { bracketPairs: true, indentation: true },
+              contextmenu: true,
+              padding: { top: 12, bottom: 12 },
+            }}
+          />
+        </div>
+
+        {/* Markdown Live Preview on right (Split mode) */}
+        {isMd && previewMode === 'split' && (
+          <div className="h-full w-1/2 overflow-hidden bg-[#141416]">
+            <MarkdownViewer content={activeFile.content} filename={activeFile.name} />
+          </div>
+        )}
+      </div>
     </div>
   );
 };

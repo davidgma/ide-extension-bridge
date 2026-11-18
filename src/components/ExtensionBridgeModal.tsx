@@ -1,7 +1,8 @@
 /**
- * Extension Bridge Inspector & Protocol v1.1 (H2_CLOUD_BRIDGE) Reference Modal.
- * Displays real-time session diagnostics, negotiated capabilities, workspace stats,
- * live message logs, and protocol specification without any mock presets.
+ * Extension Bridge Inspector & Protocol v1.2 (H2_CLOUD_BRIDGE) Reference Modal.
+ * Supports both Direct Mode (H2_CONNECT_REQ) and Launched Mode (#h2Session),
+ * displays connected drives (including hidden sidebar drives), accessMode (readwrite/readonly),
+ * negotiated capabilities, and origin authorization errors gracefully.
  *
  * Official Documentation:
  * - React: https://react.dev/reference/react
@@ -19,8 +20,11 @@ import {
   ShieldCheck,
   FileCode,
   Plug,
+  HardDrive,
+  AlertTriangle,
+  Lock,
 } from 'lucide-react';
-import { ExtensionStatus, ExtensionHandshakeInfo, BridgeMessage } from '../types/ide';
+import { ExtensionStatus, ExtensionHandshakeInfo } from '../types/ide';
 
 interface ExtensionBridgeModalProps {
   isOpen: boolean;
@@ -28,8 +32,11 @@ interface ExtensionBridgeModalProps {
   sessionId: string | null;
   extensionStatus: ExtensionStatus;
   handshakeInfo: ExtensionHandshakeInfo | null;
-  messagesLog: BridgeMessage[];
+  connectionError: string | null;
+  connectionReasonCode: string | null;
+  messagesLog: any[];
   onStartBridge: (explicitSessionId?: string) => void;
+  onConnectDirect: () => void;
   onStopBridge: () => void;
   onClearLogs: () => void;
 }
@@ -40,8 +47,11 @@ export const ExtensionBridgeModal: React.FC<ExtensionBridgeModalProps> = ({
   sessionId,
   extensionStatus,
   handshakeInfo,
+  connectionError,
+  connectionReasonCode,
   messagesLog,
   onStartBridge,
+  onConnectDirect,
   onStopBridge,
   onClearLogs,
 }) => {
@@ -51,6 +61,8 @@ export const ExtensionBridgeModal: React.FC<ExtensionBridgeModalProps> = ({
   if (!isOpen) return null;
 
   const capabilityEntries: Array<{ key: keyof NonNullable<ExtensionHandshakeInfo['capabilities']>; label: string }> = [
+    { key: 'multiDrive', label: 'Multi-Drive' },
+    { key: 'lazyTree', label: 'Lazy Tree' },
     { key: 'lazyRead', label: 'Lazy Read' },
     { key: 'save', label: 'Save Files' },
     { key: 'createFiles', label: 'Create Files' },
@@ -61,13 +73,15 @@ export const ExtensionBridgeModal: React.FC<ExtensionBridgeModalProps> = ({
   ];
 
   const protocolMessages = [
-    { type: 'Type 1a: H2_HANDSHAKE_REQ', direction: 'Web App -> Extension', desc: 'Initiates session handshake using h2Session from URL hash/search.' },
-    { type: 'Type 1b: H2_HANDSHAKE_RES', direction: 'Extension -> Web App', desc: 'Returns provider, rootName, primaryRelativePath, and capabilities.' },
-    { type: 'Type 2: H2_WORKSPACE_TREE', direction: 'Extension -> Web App', desc: 'Pushes workspace folder & file metadata only (no file contents).' },
-    { type: 'Type 3: H2_WORKSPACE_TREE_ACK', direction: 'Web App -> Extension', desc: 'Confirms receipt of workspace folder and file counts.' },
-    { type: 'Type 4/5: H2_READ_FILE_REQ / RES', direction: 'Bidirectional', desc: 'Lazily fetches utf-8 or base64 content when a file is opened.' },
-    { type: 'Type 6/7: H2_SAVE_FILE_REQ / RES', direction: 'Bidirectional', desc: 'Saves edits or creates files/subdirectories via relativePath.' },
-    { type: 'Type 8/9: H2_DELETE_FILE_REQ / RES', direction: 'Bidirectional', desc: 'Deletes or trashes individual files or folders.' },
+    { type: 'Type 0a/0b: H2_CONNECT_REQ / H2_CONNECT_RES', direction: 'Direct Mode', desc: 'Connects directly from an authorised origin without #h2Session, returning sessionId, accessMode, drives, and capabilities.' },
+    { type: 'Type 1a/1b: H2_HANDSHAKE_REQ / H2_HANDSHAKE_RES', direction: 'Launched Mode', desc: 'Pairs with an existing #h2Session=<sessionId> launched from File Manager.' },
+    { type: 'Type 2a/2: H2_WORKSPACE_TREE_REQ / H2_WORKSPACE_TREE', direction: 'Bidirectional', desc: 'Requests or pushes metadata-only folder trees with optional provider ("all" or drive) and maxDepth.' },
+    { type: 'Type 2b/2c: H2_LIST_FOLDER_REQ / H2_LIST_FOLDER_RES', direction: 'Bidirectional', desc: 'Lazily loads deeper folder levels when expanding nodes with childrenLoaded: false.' },
+    { type: 'Type 3: H2_WORKSPACE_TREE_ACK', direction: 'Web App -> Extension', desc: 'Acknowledges receipt of H2_WORKSPACE_TREE folder and file counts.' },
+    { type: 'Type 4/5: H2_READ_FILE_REQ / H2_READ_FILE_RES', direction: 'Concurrent Safe', desc: 'Lazily reads utf-8 or base64 file content (supports concurrent Promise.all requests).' },
+    { type: 'Type 6/7: H2_SAVE_FILE_REQ / H2_SAVE_FILE_RES', direction: 'Readwrite Only', desc: 'Saves edits or creates files/subdirectories via relativePath and provider.' },
+    { type: 'Type 8/9: H2_DELETE_FILE_REQ / H2_DELETE_FILE_RES', direction: 'Readwrite Only', desc: 'Deletes or trashes individual files or folders.' },
+    { type: 'Type 10a/10b: H2_DISCONNECT_REQ / H2_DISCONNECT_RES', direction: 'Bidirectional', desc: 'Closes the active extension bridge session cleanly.' },
   ];
 
   const handleReconnect = (e: React.FormEvent) => {
@@ -89,11 +103,11 @@ export const ExtensionBridgeModal: React.FC<ExtensionBridgeModalProps> = ({
               <h2 className="text-base font-bold text-white flex items-center gap-2">
                 <span>Extension Bridge Inspector</span>
                 <span className="text-xs px-2 py-0.5 rounded-full font-mono bg-blue-950/70 border border-blue-500/40 text-blue-300 font-normal">
-                  H2_CLOUD_BRIDGE v1.1
+                  H2_CLOUD_BRIDGE v1.2
                 </span>
               </h2>
               <p className="text-xs text-zinc-400">
-                Handshake-only session bridge over window.postMessage for cloud workspaces.
+                Supports Launched Mode (#h2Session) and Direct Mode (authorised origins) over window.postMessage.
               </p>
             </div>
           </div>
@@ -129,12 +143,19 @@ export const ExtensionBridgeModal: React.FC<ExtensionBridgeModalProps> = ({
               />
               <span>
                 {extensionStatus === 'connected'
-                  ? 'Connected to Extension'
+                  ? `Connected (${handshakeInfo?.sessionMode || 'launched'})`
                   : extensionStatus === 'connecting'
-                  ? 'Performing Handshake...'
+                  ? 'Connecting...'
                   : 'Disconnected'}
               </span>
             </div>
+
+            {handshakeInfo?.accessMode === 'readonly' && (
+              <span className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs bg-red-950/70 text-red-300 border border-red-500/40">
+                <Lock className="w-3 h-3" />
+                Read-Only
+              </span>
+            )}
 
             <span className="text-xs text-zinc-400 font-mono">
               Session: <strong className="text-zinc-200">{sessionId || 'none'}</strong>
@@ -151,19 +172,28 @@ export const ExtensionBridgeModal: React.FC<ExtensionBridgeModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            {extensionStatus === 'connected' || extensionStatus === 'connecting' ? (
+            {(extensionStatus === 'connected' || extensionStatus === 'connecting') && (
               <button
                 onClick={onStopBridge}
                 className="px-2.5 py-1 text-xs rounded bg-red-950/80 hover:bg-red-900 text-red-200 border border-red-700/60 transition"
               >
                 Disconnect
               </button>
-            ) : null}
+            )}
+
+            <button
+              onClick={onConnectDirect}
+              className="px-2.5 py-1 text-xs rounded bg-emerald-600 hover:bg-emerald-500 text-white font-medium transition flex items-center gap-1"
+              title="Send H2_CONNECT_REQ (Direct Mode v1.2)"
+            >
+              <Plug className="w-3 h-3" />
+              <span>Direct Connect</span>
+            </button>
 
             <button
               onClick={() => onStartBridge(manualSid.trim() || undefined)}
               className="px-2.5 py-1 text-xs rounded bg-blue-600 hover:bg-blue-500 text-white font-medium transition flex items-center gap-1"
-              title="Send H2_HANDSHAKE_REQ"
+              title="Auto-connect or Handshake"
             >
               <RotateCw className="w-3 h-3" />
               <span>Handshake</span>
@@ -181,7 +211,7 @@ export const ExtensionBridgeModal: React.FC<ExtensionBridgeModalProps> = ({
                 : 'border-transparent text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            Session & Message Stream ({messagesLog.length})
+            Session, Drives & Stream ({messagesLog.length})
           </button>
           <button
             onClick={() => setActiveTab('protocol')}
@@ -191,7 +221,7 @@ export const ExtensionBridgeModal: React.FC<ExtensionBridgeModalProps> = ({
                 : 'border-transparent text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            Protocol v1.1 Specification
+            Protocol v1.2 Specification
           </button>
         </div>
 
@@ -199,6 +229,25 @@ export const ExtensionBridgeModal: React.FC<ExtensionBridgeModalProps> = ({
         <div className="flex-1 overflow-y-auto p-6 bg-[#0f0f11]">
           {activeTab === 'status' && (
             <div className="space-y-5">
+              {/* Connection refusal / origin authorization notice */}
+              {connectionError && (
+                <div className="p-4 rounded-xl border border-red-500/40 bg-red-950/30 flex items-start gap-3 text-xs text-red-200">
+                  <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <div className="font-semibold text-white">
+                      Extension Connection Notice
+                      {connectionReasonCode ? ` (${connectionReasonCode})` : ''}
+                    </div>
+                    <p className="text-red-200/90">{connectionError}</p>
+                    {connectionReasonCode === 'ORIGIN_NOT_AUTHORIZED' && (
+                      <p className="text-zinc-300 text-[11px]">
+                        Authorize <code className="font-mono text-blue-300">{window.location.origin}</code> in the extension settings or launch directly from the File Manager.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Attach Session ID Form */}
               <form
                 onSubmit={handleReconnect}
@@ -206,13 +255,13 @@ export const ExtensionBridgeModal: React.FC<ExtensionBridgeModalProps> = ({
               >
                 <div className="flex items-center gap-2 text-xs text-zinc-300 font-medium">
                   <Plug className="w-4 h-4 text-blue-400" />
-                  <span>Attach Session ID:</span>
+                  <span>Launched Session ID:</span>
                 </div>
                 <input
                   type="text"
                   value={manualSid}
                   onChange={e => setManualSid(e.target.value)}
-                  placeholder={sessionId || 'Paste h2Session ID from #h2Session=...'}
+                  placeholder={sessionId || 'Optional h2Session ID (leave blank for Direct Connect)'}
                   className="flex-1 min-w-[200px] px-3 py-1.5 rounded bg-zinc-950 border border-zinc-700 text-xs font-mono text-white focus:outline-none focus:border-blue-500"
                 />
                 <button
@@ -223,13 +272,13 @@ export const ExtensionBridgeModal: React.FC<ExtensionBridgeModalProps> = ({
                 </button>
               </form>
 
-              {/* Capabilities & Stats */}
+              {/* Drives, Capabilities & Metadata */}
               {handshakeInfo && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/50 space-y-2">
                     <h4 className="text-xs font-semibold text-zinc-200 flex items-center gap-2">
                       <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                      <span>Negotiated Capabilities</span>
+                      <span>Capabilities ({handshakeInfo.accessMode || 'readwrite'})</span>
                     </h4>
                     <div className="flex flex-wrap gap-1.5">
                       {capabilityEntries.map(({ key, label }) => {
@@ -250,16 +299,38 @@ export const ExtensionBridgeModal: React.FC<ExtensionBridgeModalProps> = ({
                     </div>
                   </div>
 
-                  <div className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/50 space-y-1.5 text-xs font-mono text-zinc-300">
-                    <h4 className="font-sans font-semibold text-zinc-200 flex items-center gap-2 mb-2">
-                      <FileCode className="w-4 h-4 text-blue-400" />
-                      <span>Workspace Metadata</span>
+                  <div className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/50 space-y-2 text-xs font-mono text-zinc-300">
+                    <h4 className="font-sans font-semibold text-zinc-200 flex items-center gap-2">
+                      <HardDrive className="w-4 h-4 text-blue-400" />
+                      <span>Connected Drives & Workspace</span>
                     </h4>
                     <div>Root: <span className="text-white">{handshakeInfo.rootName || '-'}</span></div>
-                    <div>Launched Type: <span className="text-blue-400">{handshakeInfo.launchedItemType || '-'}</span></div>
+                    <div>
+                      Session Mode: <span className="text-blue-300">{handshakeInfo.sessionMode || 'launched'}</span>
+                      {' | '}
+                      Version: <span className="text-emerald-300">{handshakeInfo.version}</span>
+                    </div>
+                    {handshakeInfo.drives && (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {Object.entries(handshakeInfo.drives).map(([drive, status]) => (
+                          <span
+                            key={drive}
+                            className={`px-2 py-0.5 rounded text-[10.5px] border ${
+                              status.connected
+                                ? status.visible
+                                  ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/30'
+                                  : 'bg-blue-950/60 text-blue-300 border-blue-500/30'
+                                : 'bg-zinc-950 text-zinc-500 border-zinc-800'
+                            }`}
+                          >
+                            {drive}: {status.connected ? (status.visible ? 'connected' : 'hidden-in-sidebar') : 'offline'}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                     {handshakeInfo.stats && (
-                      <div>
-                        Items:{' '}
+                      <div className="pt-1 flex items-center gap-1.5">
+                        <FileCode className="w-3.5 h-3.5 text-emerald-400" />
                         <span className="text-emerald-400">
                           {handshakeInfo.stats.totalFolders} folders, {handshakeInfo.stats.totalFiles} files
                         </span>
@@ -285,10 +356,10 @@ export const ExtensionBridgeModal: React.FC<ExtensionBridgeModalProps> = ({
                   </button>
                 </div>
 
-                <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3 max-h-[280px] overflow-y-auto font-mono text-xs space-y-2">
+                <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3 max-h-[260px] overflow-y-auto font-mono text-xs space-y-2">
                   {messagesLog.length === 0 ? (
                     <div className="text-zinc-500 text-center py-6 italic text-[11px]">
-                      No bridge messages recorded yet. Open this app with #h2Session=&lt;id&gt; or start a handshake.
+                      No bridge messages recorded yet. Click Direct Connect or launch with #h2Session=&lt;id&gt;.
                     </div>
                   ) : (
                     messagesLog.map(msg => (
@@ -325,15 +396,16 @@ export const ExtensionBridgeModal: React.FC<ExtensionBridgeModalProps> = ({
           {activeTab === 'protocol' && (
             <div className="space-y-4">
               <div className="p-4 rounded-xl border border-blue-500/30 bg-blue-950/20 text-xs text-zinc-300 space-y-1.5">
-                <div className="font-semibold text-white">Envelope & Validation Rules (v1.1)</div>
+                <div className="font-semibold text-white">Envelope & Connection Rules (v1.2)</div>
                 <p>
-                  Launch URL format: <code className="text-emerald-300 font-mono">#h2Session=&lt;sessionId&gt;</code>
+                  Launched URL format: <code className="text-emerald-300 font-mono">#h2Session=&lt;sessionId&gt;</code>
+                  {' '}• Direct Mode omits <code className="text-blue-300 font-mono">sessionId</code> on{' '}
+                  <code className="text-blue-300 font-mono">H2_CONNECT_REQ</code>.
                 </p>
                 <p>
                   Replies are accepted only when <code className="text-blue-300 font-mono">event.source === window</code>,{' '}
-                  <code className="text-blue-300 font-mono">protocol === "H2_CLOUD_BRIDGE"</code>,{' '}
-                  <code className="text-blue-300 font-mono">__h2FromExtension === true</code>, and{' '}
-                  <code className="text-blue-300 font-mono">sessionId</code> matches the active session.
+                  <code className="text-blue-300 font-mono">protocol === "H2_CLOUD_BRIDGE"</code>, and{' '}
+                  <code className="text-blue-300 font-mono">__h2FromExtension === true</code>.
                 </p>
               </div>
 
@@ -358,7 +430,7 @@ export const ExtensionBridgeModal: React.FC<ExtensionBridgeModalProps> = ({
         <div className="px-6 py-3 border-t border-zinc-800 bg-zinc-900/60 flex items-center justify-between text-xs text-zinc-400">
           <div className="flex items-center gap-2 font-mono">
             <span>Protocol:</span>
-            <span className="text-emerald-400 font-semibold">H2_CLOUD_BRIDGE v1.1</span>
+            <span className="text-emerald-400 font-semibold">H2_CLOUD_BRIDGE v1.2</span>
           </div>
           <button
             onClick={onClose}

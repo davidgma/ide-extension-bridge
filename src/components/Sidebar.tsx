@@ -1,7 +1,9 @@
 /**
  * Workspace File Explorer Sidebar.
- * Displays folders (including empty subdirectories) and files from H2_WORKSPACE_TREE,
- * supports nested file creation (H2_SAVE_FILE_REQ) and file/folder deletion (H2_DELETE_FILE_REQ).
+ * Displays folders (including empty & lazily-loaded subdirectories where childrenLoaded === false)
+ * and files from H2_WORKSPACE_TREE / H2_LIST_FOLDER_RES.
+ * Supports nested file creation (H2_SAVE_FILE_REQ), file/folder deletion (H2_DELETE_FILE_REQ),
+ * multi-drive switching (H2_WORKSPACE_TREE_REQ), and read-only capability enforcement.
  *
  * Official Documentation:
  * - Lucide React Icons: https://lucide.dev/guide/packages/lucide-react
@@ -30,8 +32,11 @@ import {
   Trash2,
   Edit2,
   HardDrive,
+  RotateCw,
+  EyeOff,
+  Lock,
 } from 'lucide-react';
-import { CloudFile, FileTreeNode, CloudProvider } from '../types/ide';
+import { CloudFile, FileTreeNode, CloudProvider, H2DriveStatus } from '../types/ide';
 import { getFileExtension, isImageFile, isVideoFile, buildFileTree } from '../utils/fileSystem';
 
 interface SidebarProps {
@@ -39,11 +44,22 @@ interface SidebarProps {
   activeFileId: string | null;
   cloudProvider: CloudProvider;
   workspaceName: string;
+  isConnected: boolean;
+  isReadOnly: boolean;
+  canCreateFiles: boolean;
+  canCreateFolders: boolean;
+  canDeleteFiles: boolean;
+  canDeleteFolders: boolean;
+  drives?: Record<string, H2DriveStatus>;
+  selectedDrive?: CloudProvider;
+  onSelectDrive?: (drive: CloudProvider) => void;
+  onRefreshTree?: () => void;
+  onExpandFolder: (folder: CloudFile) => void;
   onSelectFile: (fileId: string) => void;
   onCreateFile: (path: string, content?: string) => void;
   onCreateFolder: (folderPath: string) => void;
   onDeleteFile: (fileId: string) => void;
-  onDeleteFolder: (folderPath: string, folderId?: string) => void;
+  onDeleteFolder: (folderPath: string, folderId?: string, folderProvider?: CloudProvider) => void;
   onRenameFile: (fileId: string, newPath: string) => void;
   onUploadFiles: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onExportWorkspace: () => void;
@@ -54,6 +70,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
   activeFileId,
   cloudProvider,
   workspaceName,
+  isConnected,
+  isReadOnly,
+  canCreateFiles,
+  canCreateFolders,
+  canDeleteFiles,
+  canDeleteFolders,
+  drives,
+  selectedDrive,
+  onSelectDrive,
+  onRefreshTree,
+  onExpandFolder,
   onSelectFile,
   onCreateFile,
   onCreateFolder,
@@ -65,6 +92,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
+  const [expandedLazyFolders, setExpandedLazyFolders] = useState<Record<string, boolean>>({});
   const [showNewFileInput, setShowNewFileInput] = useState(false);
   const [showNewFolderInput, setShowNewFolderInput] = useState(false);
   const [newPathInput, setNewPathInput] = useState('');
@@ -73,6 +101,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [confirmDeleteKey, setConfirmDeleteKey] = useState<string | null>(null);
 
   const fileCount = React.useMemo(() => files.filter(f => !f.isDirectory).length, [files]);
+
+  const connectedDrives = React.useMemo(() => {
+    if (!drives) return [];
+    return Object.entries(drives).filter(([, status]) => status?.connected);
+  }, [drives]);
 
   // Filter files if searching
   const filteredFiles = React.useMemo(
@@ -88,10 +121,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const fileTree = React.useMemo(() => buildFileTree(filteredFiles), [filteredFiles]);
 
-  const toggleFolder = (path: string) => {
+  const handleToggleFolder = (node: FileTreeNode) => {
+    const folderFile = node.file;
+    // If deeper folder contents were not loaded yet (childrenLoaded === false), trigger H2_LIST_FOLDER_REQ
+    if (folderFile && folderFile.childrenLoaded === false) {
+      const currentlyExpanded = Boolean(expandedLazyFolders[node.path]);
+      if (!currentlyExpanded) {
+        setExpandedLazyFolders(prev => ({ ...prev, [node.path]: true }));
+        setCollapsedFolders(prev => ({ ...prev, [node.path]: false }));
+        if (!folderFile.isLoadingChildren) {
+          onExpandFolder(folderFile);
+        }
+        return;
+      }
+    }
+
     setCollapsedFolders(prev => ({
       ...prev,
-      [path]: !prev[path],
+      [node.path]: !prev[node.path],
     }));
   };
 
@@ -143,7 +190,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const renderTree = (nodes: FileTreeNode[], depth = 0) => {
     return nodes.map(node => {
       const isFolder = node.isDirectory;
-      const isCollapsed = Boolean(collapsedFolders[node.path]);
+      const isLazyUnloaded = Boolean(isFolder && node.file?.childrenLoaded === false);
+      const isCollapsed = isLazyUnloaded
+        ? !expandedLazyFolders[node.path] || Boolean(collapsedFolders[node.path])
+        : Boolean(collapsedFolders[node.path]);
+      const isLoadingChildren = Boolean(node.file?.isLoadingChildren);
       const isFileActive = !isFolder && node.file && node.file.id === activeFileId;
       const isDirty = !isFolder && node.file?.isDirty;
       const isUnloaded = !isFolder && node.file?.contentLoaded === false;
@@ -154,12 +205,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
         return (
           <div key={`dir-${node.path}`} className="select-auto">
             <div
-              onClick={() => toggleFolder(node.path)}
+              onClick={() => handleToggleFolder(node)}
               style={{ paddingLeft: `${depth * 14 + 10}px` }}
               className="flex items-center justify-between py-1 pr-2 hover:bg-zinc-800/60 cursor-pointer text-zinc-400 hover:text-zinc-200 text-xs group"
+              title={
+                isLazyUnloaded
+                  ? `${node.path} — Click to load folder contents (H2_LIST_FOLDER_REQ)`
+                  : node.path
+              }
             >
               <div className="flex items-center gap-1.5 truncate">
-                {isCollapsed ? (
+                {isLoadingChildren ? (
+                  <RotateCw className="w-3.5 h-3.5 text-blue-400 animate-spin shrink-0" />
+                ) : isCollapsed ? (
                   <ChevronRight className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
                 ) : (
                   <ChevronDown className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
@@ -170,57 +228,66 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <FolderOpen className="w-3.5 h-3.5 text-blue-400 shrink-0" />
                 )}
                 <span className="truncate font-medium text-zinc-300 text-[11.5px]">{node.name}</span>
-              </div>
-
-              <div className="flex items-center gap-1 shrink-0">
-                {isConfirmingDelete ? (
-                  <div
-                    className="flex items-center gap-1"
-                    onClick={e => e.stopPropagation()}
-                  >
-                    <button
-                      onClick={() => {
-                        setConfirmDeleteKey(null);
-                        onDeleteFolder(node.path, node.file?.folderId);
-                      }}
-                      className="px-1.5 py-0.5 rounded bg-red-600 hover:bg-red-500 text-white text-[10px] font-semibold"
-                    >
-                      Delete
-                    </button>
-                    <button
-                      onClick={() => setConfirmDeleteKey(null)}
-                      className="px-1 py-0.5 rounded bg-zinc-700 text-zinc-200 text-[10px]"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                ) : (
-                  <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity">
-                    <button
-                      onClick={e => {
-                        e.stopPropagation();
-                        setShowNewFileInput(true);
-                        setShowNewFolderInput(false);
-                        setNewPathInput(`${node.path}/`);
-                      }}
-                      className="p-1 hover:text-emerald-400 rounded hover:bg-zinc-700/60"
-                      title={`New file inside ${node.path}`}
-                    >
-                      <Plus className="w-3 h-3" />
-                    </button>
-                    <button
-                      onClick={e => {
-                        e.stopPropagation();
-                        setConfirmDeleteKey(deleteKey);
-                      }}
-                      className="p-1 hover:text-red-400 rounded hover:bg-zinc-700/60"
-                      title="Delete folder"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
-                  </div>
+                {isLazyUnloaded && (
+                  <span className="text-[9px] font-mono text-blue-400/80 shrink-0">...</span>
                 )}
               </div>
+
+              {!isReadOnly && (
+                <div className="flex items-center gap-1 shrink-0">
+                  {isConfirmingDelete ? (
+                    <div
+                      className="flex items-center gap-1"
+                      onClick={e => e.stopPropagation()}
+                    >
+                      <button
+                        onClick={() => {
+                          setConfirmDeleteKey(null);
+                          onDeleteFolder(node.path, node.file?.folderId, node.file?.cloudProvider);
+                        }}
+                        className="px-1.5 py-0.5 rounded bg-red-600 hover:bg-red-500 text-white text-[10px] font-semibold"
+                      >
+                        Delete
+                      </button>
+                      <button
+                        onClick={() => setConfirmDeleteKey(null)}
+                        className="px-1 py-0.5 rounded bg-zinc-700 text-zinc-200 text-[10px]"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity">
+                      {canCreateFiles && (
+                        <button
+                          onClick={e => {
+                            e.stopPropagation();
+                            setShowNewFileInput(true);
+                            setShowNewFolderInput(false);
+                            setNewPathInput(`${node.path}/`);
+                          }}
+                          className="p-1 hover:text-emerald-400 rounded hover:bg-zinc-700/60"
+                          title={`New file inside ${node.path}`}
+                        >
+                          <Plus className="w-3 h-3" />
+                        </button>
+                      )}
+                      {canDeleteFolders && (
+                        <button
+                          onClick={e => {
+                            e.stopPropagation();
+                            setConfirmDeleteKey(deleteKey);
+                          }}
+                          className="p-1 hover:text-red-400 rounded hover:bg-zinc-700/60"
+                          title="Delete folder"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {!isCollapsed && node.children && node.children.length > 0 && (
@@ -234,7 +301,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       const file = node.file;
       if (!file) return null;
 
-      if (renamingId === file.id) {
+      if (renamingId === file.id && !isReadOnly) {
         return (
           <form
             key={node.path}
@@ -258,7 +325,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       return (
         <div
-          key={node.path}
+          key={`${file.cloudProvider}:${node.path}`}
           onClick={() => onSelectFile(file.id)}
           style={{ paddingLeft: `${depth * 14 + 16}px` }}
           className={`flex items-center justify-between py-1 pr-2 cursor-pointer text-xs group transition-colors ${
@@ -280,51 +347,57 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <span className="w-2 h-2 rounded-full bg-red-400" title="Unsaved changes" />
             )}
 
-            {isConfirmingDelete ? (
-              <div
-                className="flex items-center gap-1"
-                onClick={e => e.stopPropagation()}
-              >
-                <button
-                  onClick={() => {
-                    setConfirmDeleteKey(null);
-                    onDeleteFile(file.id);
-                  }}
-                  className="px-1.5 py-0.5 rounded bg-red-600 hover:bg-red-500 text-white text-[10px] font-semibold"
-                >
-                  Delete
-                </button>
-                <button
-                  onClick={() => setConfirmDeleteKey(null)}
-                  className="px-1 py-0.5 rounded bg-zinc-700 text-zinc-200 text-[10px]"
-                >
-                  Cancel
-                </button>
-              </div>
-            ) : (
-              <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity">
-                <button
-                  onClick={e => {
-                    e.stopPropagation();
-                    setRenamingId(file.id);
-                    setRenameInput(file.path);
-                  }}
-                  className="p-1 hover:text-white rounded hover:bg-zinc-700/60"
-                  title="Rename file"
-                >
-                  <Edit2 className="w-3 h-3" />
-                </button>
-                <button
-                  onClick={e => {
-                    e.stopPropagation();
-                    setConfirmDeleteKey(deleteKey);
-                  }}
-                  className="p-1 hover:text-red-400 rounded hover:bg-zinc-700/60"
-                  title="Delete file"
-                >
-                  <Trash2 className="w-3 h-3" />
-                </button>
-              </div>
+            {!isReadOnly && (
+              <>
+                {isConfirmingDelete ? (
+                  <div
+                    className="flex items-center gap-1"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <button
+                      onClick={() => {
+                        setConfirmDeleteKey(null);
+                        onDeleteFile(file.id);
+                      }}
+                      className="px-1.5 py-0.5 rounded bg-red-600 hover:bg-red-500 text-white text-[10px] font-semibold"
+                    >
+                      Delete
+                    </button>
+                    <button
+                      onClick={() => setConfirmDeleteKey(null)}
+                      className="px-1 py-0.5 rounded bg-zinc-700 text-zinc-200 text-[10px]"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity">
+                    <button
+                      onClick={e => {
+                        e.stopPropagation();
+                        setRenamingId(file.id);
+                        setRenameInput(file.path);
+                      }}
+                      className="p-1 hover:text-white rounded hover:bg-zinc-700/60"
+                      title="Rename file"
+                    >
+                      <Edit2 className="w-3 h-3" />
+                    </button>
+                    {canDeleteFiles && (
+                      <button
+                        onClick={e => {
+                          e.stopPropagation();
+                          setConfirmDeleteKey(deleteKey);
+                        }}
+                        className="p-1 hover:text-red-400 rounded hover:bg-zinc-700/60"
+                        title="Delete file"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -335,7 +408,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   return (
     <aside className="w-64 h-full bg-[#1b1b1e] border-r border-zinc-800 flex flex-col select-auto shrink-0">
       {/* Workspace Cloud Header */}
-      <div className="p-3 border-b border-zinc-800/80 bg-zinc-900/40">
+      <div className="p-3 border-b border-zinc-800/80 bg-zinc-900/40 space-y-2">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5 truncate">
             <HardDrive className="w-4 h-4 text-emerald-400 shrink-0" />
@@ -343,48 +416,108 @@ export const Sidebar: React.FC<SidebarProps> = ({
               {workspaceName}
             </span>
           </div>
-          <span className="px-1.5 py-0.2 rounded text-[10px] font-mono normal-case bg-emerald-950 text-emerald-400 border border-emerald-500/30 shrink-0">
+          <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-emerald-950 text-emerald-400 border border-emerald-500/30 shrink-0">
             {cloudProvider}
           </span>
         </div>
 
-        {/* Toolbar: New File, New Folder, Upload, Download */}
-        <div className="flex items-center justify-between mt-2 pt-2 border-t border-zinc-800/60 text-zinc-400">
-          <span className="text-[10px] normal-case font-bold tracking-wider text-zinc-400">
+        {/* Read-only notice */}
+        {isReadOnly && (
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-red-950/50 border border-red-500/30 text-red-300 text-[10.5px]">
+            <Lock className="w-3 h-3 shrink-0" />
+            <span>Read-Only Session</span>
+          </div>
+        )}
+
+        {/* Connected Multi-Drive Switcher (v1.2 Direct Mode / multiDrive) */}
+        {isConnected && connectedDrives.length > 0 && onSelectDrive && (
+          <div className="flex flex-wrap items-center gap-1 pt-1 border-t border-zinc-800/60">
+            <button
+              onClick={() => onSelectDrive('all')}
+              className={`px-1.5 py-0.5 rounded text-[10px] font-mono border transition ${
+                (selectedDrive || cloudProvider) === 'all'
+                  ? 'bg-blue-600 text-white border-blue-500 font-semibold'
+                  : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-white'
+              }`}
+              title="Query all connected drives (H2_WORKSPACE_TREE_REQ)"
+            >
+              all
+            </button>
+            {connectedDrives.map(([driveKey, status]) => {
+              const isSelected = (selectedDrive || cloudProvider) === driveKey;
+              return (
+                <button
+                  key={driveKey}
+                  onClick={() => onSelectDrive(driveKey)}
+                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono border transition ${
+                    isSelected
+                      ? 'bg-emerald-600 text-white border-emerald-500 font-semibold'
+                      : 'bg-zinc-900 text-zinc-300 border-zinc-800 hover:border-emerald-500/40'
+                  }`}
+                  title={
+                    status.visible
+                      ? `Browse ${driveKey}`
+                      : `Browse ${driveKey} (authenticated, hidden in extension sidebar)`
+                  }
+                >
+                  <span>{driveKey}</span>
+                  {!status.visible && <EyeOff className="w-2.5 h-2.5 text-blue-300" />}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Toolbar */}
+        <div className="flex items-center justify-between pt-2 border-t border-zinc-800/60 text-zinc-400">
+          <span className="text-[10px] font-bold tracking-wider text-zinc-400">
             Files ({fileCount})
           </span>
           <div className="flex items-center gap-1">
-            <button
-              onClick={() => {
-                setShowNewFileInput(true);
-                setShowNewFolderInput(false);
-                setNewPathInput('');
-              }}
-              className="p-1 hover:bg-zinc-800 hover:text-white rounded text-zinc-400 transition"
-              title="New File (supports nested paths e.g. src/utils/new.ts)"
-            >
-              <Plus className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={() => {
-                setShowNewFolderInput(true);
-                setShowNewFileInput(false);
-                setNewPathInput('');
-              }}
-              className="p-1 hover:bg-zinc-800 hover:text-white rounded text-zinc-400 transition"
-              title="New Folder"
-            >
-              <FolderPlus className="w-3.5 h-3.5" />
-            </button>
-            {/* Upload file */}
-            <label
-              className="p-1 hover:bg-zinc-800 hover:text-white rounded text-zinc-400 transition cursor-pointer"
-              title="Upload file into workspace"
-            >
-              <Upload className="w-3.5 h-3.5" />
-              <input type="file" multiple onChange={onUploadFiles} className="hidden" />
-            </label>
-            {/* Export workspace */}
+            {isConnected && onRefreshTree && (
+              <button
+                onClick={onRefreshTree}
+                className="p-1 hover:bg-zinc-800 hover:text-blue-300 rounded text-zinc-400 transition"
+                title="Refresh workspace tree (H2_WORKSPACE_TREE_REQ)"
+              >
+                <RotateCw className="w-3.5 h-3.5" />
+              </button>
+            )}
+            {!isReadOnly && canCreateFiles && (
+              <button
+                onClick={() => {
+                  setShowNewFileInput(true);
+                  setShowNewFolderInput(false);
+                  setNewPathInput('');
+                }}
+                className="p-1 hover:bg-zinc-800 hover:text-white rounded text-zinc-400 transition"
+                title="New File (supports nested paths e.g. src/utils/new.ts)"
+              >
+                <Plus className="w-3.5 h-3.5" />
+              </button>
+            )}
+            {!isReadOnly && canCreateFolders && (
+              <button
+                onClick={() => {
+                  setShowNewFolderInput(true);
+                  setShowNewFileInput(false);
+                  setNewPathInput('');
+                }}
+                className="p-1 hover:bg-zinc-800 hover:text-white rounded text-zinc-400 transition"
+                title="New Folder"
+              >
+                <FolderPlus className="w-3.5 h-3.5" />
+              </button>
+            )}
+            {!isReadOnly && canCreateFiles && (
+              <label
+                className="p-1 hover:bg-zinc-800 hover:text-white rounded text-zinc-400 transition cursor-pointer"
+                title="Upload file into workspace"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                <input type="file" multiple onChange={onUploadFiles} className="hidden" />
+              </label>
+            )}
             <button
               onClick={onExportWorkspace}
               className="p-1 hover:bg-zinc-800 hover:text-white rounded text-zinc-400 transition"
@@ -411,9 +544,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       {/* Inline New File / Folder input */}
-      {showNewFileInput && (
+      {showNewFileInput && !isReadOnly && (
         <form onSubmit={handleCreateFileSubmit} className="p-2 border-b border-zinc-800 bg-zinc-900">
-          <div className="text-[10px] text-emerald-400 font-mono mb-1">Create new file (nested paths allowed):</div>
+          <div className="text-[10px] text-emerald-400 font-mono mb-1">
+            Create new file (nested paths allowed):
+          </div>
           <div className="flex items-center gap-1">
             <input
               type="text"
@@ -425,7 +560,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             />
             <button
               type="submit"
-              className="px-2 py-1 bg-emerald-600 text-black text-xs font-semibold rounded"
+              className="px-2 py-1 bg-emerald-600 text-white text-xs font-semibold rounded"
             >
               Add
             </button>
@@ -440,7 +575,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </form>
       )}
 
-      {showNewFolderInput && (
+      {showNewFolderInput && !isReadOnly && (
         <form onSubmit={handleCreateFolderSubmit} className="p-2 border-b border-zinc-800 bg-zinc-900">
           <div className="text-[10px] text-blue-400 font-mono mb-1">Create new directory:</div>
           <div className="flex items-center gap-1">
@@ -486,7 +621,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <button
           onClick={() => setCollapsedFolders({})}
           className="hover:text-zinc-300 text-[10px] underline"
-          title="Expand all tree folders"
+          title="Expand all loaded folders"
         >
           Expand All
         </button>

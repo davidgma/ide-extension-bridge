@@ -1,7 +1,7 @@
 /**
  * Top IDE Header & Action Toolbar.
- * Displays brand identity, H2_CLOUD_BRIDGE v1.1 connection controls, active file metadata,
- * theme selection, and Save / Run / Search actions.
+ * Displays brand identity, H2_CLOUD_BRIDGE v1.2 connection controls (Direct & Launched modes),
+ * read-only capability state, active file metadata, and Save / Run / Search actions.
  *
  * Official Documentation:
  * - React: https://react.dev/reference/react
@@ -23,6 +23,7 @@ import {
   Play,
   Plug,
   Radio,
+  Lock,
 } from 'lucide-react';
 import { CloudFile, EditorTheme, ExtensionStatus, ExtensionHandshakeInfo } from '../types/ide';
 
@@ -33,6 +34,8 @@ interface HeaderProps {
   extensionStatus: ExtensionStatus;
   handshakeInfo: ExtensionHandshakeInfo | null;
   isSaving: boolean;
+  isReadOnly: boolean;
+  canSave: boolean;
   activeTheme: EditorTheme;
   wordWrap: boolean;
   minimap: boolean;
@@ -60,6 +63,8 @@ export const Header: React.FC<HeaderProps> = ({
   extensionStatus,
   handshakeInfo,
   isSaving,
+  isReadOnly,
+  canSave,
   activeTheme,
   lineCount,
   charCount,
@@ -79,12 +84,12 @@ export const Header: React.FC<HeaderProps> = ({
   const dirtyFilesCount = nonDirFiles.filter(f => f.isDirty).length;
   const isCurrentDirty = activeFile?.isDirty;
   const providerLabel = handshakeInfo?.provider || 'cloud';
+  const modeLabel = handshakeInfo?.sessionMode || (sessionId ? 'launched' : 'direct');
 
   return (
     <header className="h-12 bg-[#18181b] border-b border-zinc-800 flex items-center justify-between px-3 text-xs select-auto shadow-md z-30">
       {/* Left Brand & Extension Bridge Controls */}
       <div className="flex items-center gap-3">
-        {/* Brand */}
         <div className="flex items-center gap-2 group cursor-pointer" onClick={onOpenBridgeModal}>
           <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-emerald-500 to-blue-600 flex items-center justify-center shadow-lg shadow-emerald-900/30">
             <Radio className="w-4 h-4 text-white" />
@@ -94,7 +99,7 @@ export const Header: React.FC<HeaderProps> = ({
               <span>FreshFood</span>
               <span className="text-emerald-400">.rocks</span>
               <span className="text-[10px] font-mono px-1.5 py-0.5 bg-emerald-950 text-emerald-300 border border-emerald-500/30 rounded font-normal">
-                Monarch IDE v1.1
+                Monarch IDE v1.2
               </span>
             </div>
           </div>
@@ -112,7 +117,6 @@ export const Header: React.FC<HeaderProps> = ({
           <ExternalLink className="w-3 h-3 opacity-60" />
         </a>
 
-        {/* Divider */}
         <div className="h-4 w-px bg-zinc-800 hidden md:block" />
 
         {/* H2 Bridge Connection Controls */}
@@ -121,14 +125,20 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="flex items-center gap-2 pl-2.5 pr-1 py-0.5">
               <span className="w-2 h-2 rounded-full bg-emerald-400" />
               <span className="text-emerald-300 font-medium text-[11px] hidden sm:inline">
-                H2 Connected ({providerLabel})
+                H2 v1.2 {modeLabel} ({providerLabel})
               </span>
+              {isReadOnly && (
+                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-red-950/80 text-red-300 border border-red-700/60 text-[10px]">
+                  <Lock className="w-2.5 h-2.5" />
+                  Read-Only
+                </span>
+              )}
               <button
                 onClick={onStopBridge}
                 className="px-2 py-0.5 rounded-full bg-red-950/80 hover:bg-red-900 text-red-300 border border-red-800 text-[10px] font-semibold transition"
-                title="Disconnect H2 extension bridge"
+                title="Send H2_DISCONNECT_REQ and disconnect"
               >
-                Stop Bridge
+                Disconnect
               </button>
             </div>
           ) : extensionStatus === 'connecting' ? (
@@ -151,19 +161,19 @@ export const Header: React.FC<HeaderProps> = ({
               className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white transition"
               title={
                 sessionId
-                  ? `Connect H2 session ${sessionId}`
-                  : 'Open Extension Bridge Inspector or connect #h2Session'
+                  ? `Reconnect launched session ${sessionId}`
+                  : 'Connect directly to Clockie H2 Extension (H2_CONNECT_REQ)'
               }
             >
               <Plug className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Start H2 Bridge</span>
+              <span>Connect H2 Bridge</span>
             </button>
           )}
 
           <button
             onClick={onOpenBridgeModal}
             className="p-1 rounded-full hover:bg-zinc-800 text-zinc-400 hover:text-white transition mr-0.5"
-            title="Extension Bridge Inspector & Protocol v1.1"
+            title="Extension Bridge Inspector & Protocol v1.2"
           >
             <Radio className="w-3 h-3 text-zinc-400" />
           </button>
@@ -187,6 +197,11 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="text-zinc-600">|</span>
             {activeFile.isLoadingContent ? (
               <span className="text-[11px] text-blue-400">Loading...</span>
+            ) : isReadOnly ? (
+              <span className="text-[11px] text-red-400 flex items-center gap-1">
+                <Lock className="w-3 h-3" />
+                Read-Only
+              </span>
             ) : isCurrentDirty ? (
               <span className="text-[11px] text-blue-400 flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
@@ -206,7 +221,6 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Right Controls & Run/Save Actions */}
       <div className="flex items-center gap-2">
-        {/* Run Code Execution Button */}
         <button
           onClick={onRunCode}
           disabled={!activeFile || activeFile.isBinary || isRunningCode}
@@ -217,7 +231,6 @@ export const Header: React.FC<HeaderProps> = ({
           <span>Run</span>
         </button>
 
-        {/* Quick Open File */}
         <button
           onClick={onOpenQuickOpen}
           className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-800 text-xs transition"
@@ -230,7 +243,6 @@ export const Header: React.FC<HeaderProps> = ({
           </kbd>
         </button>
 
-        {/* Global Search */}
         <button
           onClick={onOpenSearch}
           className="p-1.5 rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-800 transition"
@@ -239,7 +251,6 @@ export const Header: React.FC<HeaderProps> = ({
           <FileSearch className="w-3.5 h-3.5" />
         </button>
 
-        {/* Theme Switcher */}
         <div className="relative hidden md:block">
           <select
             value={activeTheme}
@@ -259,13 +270,17 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Save Current File */}
         <button
           onClick={onSaveCurrent}
-          disabled={!activeFile || isSaving}
+          disabled={!activeFile || isSaving || isReadOnly || !canSave}
           className={`flex items-center gap-1.5 px-3 py-1 rounded font-medium text-xs transition ${
-            isCurrentDirty
+            isCurrentDirty && !isReadOnly
               ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-md font-semibold'
               : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white border border-zinc-700'
-          } disabled:opacity-50 disabled:pointer-events-none`}
-          title="Save file to Cloud Drive via H2_SAVE_FILE_REQ (Cmd+S / Ctrl+S)"
+          } disabled:opacity-40 disabled:pointer-events-none`}
+          title={
+            isReadOnly
+              ? 'Save disabled in read-only mode'
+              : 'Save file to Cloud Drive via H2_SAVE_FILE_REQ (Cmd+S / Ctrl+S)'
+          }
         >
           {isSaving ? (
             <RotateCw className="w-3.5 h-3.5 animate-spin" />
@@ -281,20 +296,23 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Save All to Cloud Button */}
         <button
           onClick={onSaveAll}
-          disabled={isSaving || nonDirFiles.length === 0}
-          className="flex items-center gap-1.5 px-3 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 text-xs transition relative font-medium"
-          title="Save all modified files via H2_SAVE_FILE_REQ"
+          disabled={isSaving || nonDirFiles.length === 0 || isReadOnly || !canSave}
+          className="flex items-center gap-1.5 px-3 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 text-xs transition relative font-medium disabled:opacity-40 disabled:pointer-events-none"
+          title={
+            isReadOnly
+              ? 'Save All disabled in read-only mode'
+              : 'Save all modified files via H2_SAVE_FILE_REQ'
+          }
         >
           <Cloud className="w-3.5 h-3.5 text-emerald-400" />
           <span className="hidden lg:inline">Save All</span>
-          {dirtyFilesCount > 0 && (
+          {dirtyFilesCount > 0 && !isReadOnly && (
             <span className="px-1.5 py-0.2 rounded-full bg-blue-600 text-white font-bold text-[10px]">
               {dirtyFilesCount}
             </span>
           )}
         </button>
 
-        {/* Keyboard Shortcuts Helper */}
         <button
           onClick={onOpenShortcutsModal}
           className="p-1.5 rounded hover:bg-zinc-800 text-zinc-400 hover:text-white transition"

@@ -1,5 +1,5 @@
 /**
- * Core TypeScript definitions for Monarch IDE & Clockie H2 Bridge Protocol v1.1 (H2_CLOUD_BRIDGE).
+ * Core TypeScript definitions for Monarch IDE & Clockie H2 Bridge Protocol v1.2 (H2_CLOUD_BRIDGE).
  *
  * Official Documentation:
  * - TypeScript Handbook: https://www.typescriptlang.org/docs/
@@ -10,7 +10,18 @@ export type CloudProvider = string;
 
 export type ExtensionStatus = 'connected' | 'disconnected' | 'connecting';
 
+export type H2AccessMode = 'readwrite' | 'readonly';
+
+export type H2SessionMode = 'launched' | 'direct';
+
+export interface H2DriveStatus {
+  connected: boolean;
+  visible: boolean;
+}
+
 export interface H2Capabilities {
+  multiDrive?: boolean;
+  lazyTree?: boolean;
   lazyRead?: boolean;
   save?: boolean;
   createFiles?: boolean;
@@ -33,7 +44,7 @@ export interface CloudFile {
   parentRelativePath?: string;
   /** File or folder name (e.g. "index.ts") */
   name: string;
-  /** Relative path within workspace root (e.g. "src/index.ts") */
+  /** Relative path within workspace/drive root (e.g. "src/index.ts") */
   path: string;
   /** Text content or base64 content */
   content: string;
@@ -44,6 +55,10 @@ export interface CloudFile {
   /** Error message if lazy content loading failed */
   loadError?: string;
   isDirectory?: boolean;
+  /** For directories in v1.2 depth-limited trees: false means deeper children have not been fetched yet */
+  childrenLoaded?: boolean;
+  /** True while an H2_LIST_FOLDER_REQ for this folder is in flight */
+  isLoadingChildren?: boolean;
   cloudProvider: CloudProvider;
   mimeType?: string;
   contentType?: 'text' | 'binary';
@@ -77,11 +92,14 @@ export interface ExtensionHandshakeInfo {
   name: string;
   version: string;
   sessionId: string;
+  sessionMode?: H2SessionMode;
+  accessMode?: H2AccessMode;
   provider: CloudProvider;
   rootName?: string;
   rootFolderId?: string;
   launchedItemType?: 'folder' | 'file';
   primaryRelativePath?: string;
+  drives?: Record<string, H2DriveStatus>;
   capabilities?: H2Capabilities;
   stats?: {
     totalFolders: number;
@@ -103,9 +121,14 @@ export interface DispatchTargetInfo {
 }
 
 export type H2MessageType =
+  | 'H2_CONNECT_REQ'
+  | 'H2_CONNECT_RES'
   | 'H2_HANDSHAKE_REQ'
   | 'H2_HANDSHAKE_RES'
+  | 'H2_WORKSPACE_TREE_REQ'
   | 'H2_WORKSPACE_TREE'
+  | 'H2_LIST_FOLDER_REQ'
+  | 'H2_LIST_FOLDER_RES'
   | 'H2_WORKSPACE_TREE_ACK'
   | 'H2_READ_FILE_REQ'
   | 'H2_READ_FILE_RES'
@@ -113,6 +136,8 @@ export type H2MessageType =
   | 'H2_SAVE_FILE_RES'
   | 'H2_DELETE_FILE_REQ'
   | 'H2_DELETE_FILE_RES'
+  | 'H2_DISCONNECT_REQ'
+  | 'H2_DISCONNECT_RES'
   | 'H2_SYSTEM_EVENT';
 
 export interface BridgeMessage {

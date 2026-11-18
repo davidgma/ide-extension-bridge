@@ -1,5 +1,5 @@
 /**
- * Keyboard Shortcuts & H2_CLOUD_BRIDGE v1.1 Reference Modal.
+ * Keyboard Shortcuts & H2_CLOUD_BRIDGE v1.2 Reference Modal.
  *
  * Official Documentation:
  * - React: https://react.dev/reference/react
@@ -35,23 +35,21 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
         className="w-full max-w-2xl bg-[#1c1c1f] border border-zinc-700 rounded-2xl shadow-2xl overflow-hidden select-auto"
         onClick={e => e.stopPropagation()}
       >
-        {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 bg-zinc-900">
           <div className="flex items-center gap-2 text-white font-bold text-base">
             <BookOpen className="w-5 h-5 text-emerald-400" />
-            <span>Monarch IDE & H2_CLOUD_BRIDGE v1.1 Docs</span>
+            <span>Monarch IDE & H2_CLOUD_BRIDGE v1.2 Docs</span>
           </div>
           <button onClick={onClose} className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Content */}
         <div className="p-6 space-y-5 max-h-[75vh] overflow-y-auto text-xs text-zinc-300">
           <div className="p-4 rounded-xl bg-emerald-950/20 border border-emerald-500/30 text-emerald-300">
             <h4 className="font-semibold text-white mb-1 flex items-center gap-1.5">
               <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              <span>Production Domain: ide.freshfood.rocks (v1.1)</span>
+              <span>Production Domain: ide.freshfood.rocks (v1.2)</span>
             </h4>
             <p className="text-zinc-300 leading-relaxed text-[11.5px]">
               This Single Page Application runs at{' '}
@@ -63,12 +61,10 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
               >
                 https://ide.freshfood.rocks
               </a>
-              , integrating dynamically with any cloud workspace opened via{' '}
-              <code className="font-mono text-emerald-300">#h2Session=&lt;sessionId&gt;</code>.
+              , supporting both Launched Mode (<code className="font-mono text-emerald-300">#h2Session=&lt;id&gt;</code>) and Direct Mode on authorised origins.
             </p>
           </div>
 
-          {/* Shortcuts Table */}
           <div>
             <h4 className="font-semibold text-white text-sm mb-2 flex items-center gap-1.5">
               <Command className="w-4 h-4 text-blue-400" />
@@ -86,33 +82,34 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
             </div>
           </div>
 
-          {/* Extension Protocol v1.1 Specs */}
           <div>
             <h4 className="font-semibold text-white text-sm mb-2 flex items-center gap-1.5">
               <Cloud className="w-4 h-4 text-emerald-400" />
-              <span>Clockie H2 Bridge Protocol v1.1 (H2_CLOUD_BRIDGE)</span>
+              <span>Clockie H2 Bridge Protocol v1.2 (H2_CLOUD_BRIDGE)</span>
             </h4>
             <ul className="list-disc pl-5 space-y-1.5 text-zinc-400 text-[11.5px] leading-relaxed">
               <li>
-                <strong className="text-zinc-200 font-mono">H2_HANDSHAKE_REQ / H2_HANDSHAKE_RES</strong>: Negotiates protocol v1.1, provider, and workspace capabilities using h2Session.
+                <strong className="text-zinc-200 font-mono">H2_CONNECT_REQ / H2_CONNECT_RES</strong>: Direct connection from authorised origins with sessionId, accessMode, and connected drives.
               </li>
               <li>
-                <strong className="text-zinc-200 font-mono">H2_WORKSPACE_TREE / H2_WORKSPACE_TREE_ACK</strong>: Loads metadata-only folder and file hierarchies and acknowledges receipt.
+                <strong className="text-zinc-200 font-mono">H2_HANDSHAKE_REQ / H2_HANDSHAKE_RES</strong>: Launched connection when URL contains #h2Session.
               </li>
               <li>
-                <strong className="text-zinc-200 font-mono">H2_READ_FILE_REQ / H2_READ_FILE_RES</strong>: Lazily fetches utf-8 or base64 content when a file is opened.
+                <strong className="text-zinc-200 font-mono">H2_WORKSPACE_TREE_REQ / H2_LIST_FOLDER_REQ</strong>: Depth-limited and lazy-expanded multi-drive trees (childrenLoaded).
               </li>
               <li>
-                <strong className="text-zinc-200 font-mono">H2_SAVE_FILE_REQ / H2_SAVE_FILE_RES</strong>: Saves edited files or creates new files and nested subdirectories.
+                <strong className="text-zinc-200 font-mono">H2_READ_FILE_REQ / H2_READ_FILE_RES</strong>: Lazy and concurrent (Promise.all) utf-8/base64 file reading.
               </li>
               <li>
-                <strong className="text-zinc-200 font-mono">H2_DELETE_FILE_REQ / H2_DELETE_FILE_RES</strong>: Deletes or trashes files and folders.
+                <strong className="text-zinc-200 font-mono">H2_SAVE_FILE_REQ / H2_DELETE_FILE_REQ</strong>: Readwrite cloud saves, nested file creation, and deletion.
+              </li>
+              <li>
+                <strong className="text-zinc-200 font-mono">H2_DISCONNECT_REQ / H2_DISCONNECT_RES</strong>: Clean session termination.
               </li>
             </ul>
           </div>
         </div>
 
-        {/* Footer */}
         <div className="px-6 py-3 border-t border-zinc-800 bg-zinc-900/60 flex items-center justify-end">
           <button
             onClick={onClose}
