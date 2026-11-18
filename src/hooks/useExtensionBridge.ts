@@ -1,18 +1,19 @@
 /**
- * React hook managing the Clockie H2 Bridge Protocol v1.2 (H2_CLOUD_BRIDGE) lifecycle:
- * 1. Dual Connection Modes on mount:
- *    - Launched Mode (#h2Session=<sessionId>): Type 1a/1b handshake + automatic H2_WORKSPACE_TREE.
- *    - Direct Mode (no h2Session): Type 0a/0b H2_CONNECT_REQ/RES, handles origin authorization
- *      refusals gracefully, captures accessMode ("readwrite" | "readonly") & multi-drive map.
- * 2. Depth-limited & lazy folder trees: Type 2a H2_WORKSPACE_TREE_REQ & Type 2b/2c H2_LIST_FOLDER_REQ/RES.
- * 3. Lazy / concurrent file reads: Type 4/5 H2_READ_FILE_REQ/RES (single or Promise.all batch).
- * 4. Readwrite cloud saves & nested creations: Type 6/7 H2_SAVE_FILE_REQ/RES.
- * 5. Readwrite cloud file/folder deletions: Type 8/9 H2_DELETE_FILE_REQ/RES.
- * 6. Clean disconnect: Type 10a/10b H2_DISCONNECT_REQ/RES.
+ * React hook managing the Clockie H2 Bridge Protocol v1.3 (H2_CLOUD_BRIDGE) lifecycle:
+ * 1. Zero-URL Session Binding: never reads or writes #h2Session or ?h2Session in window.location;
+ *    stores active sessionId strictly in per-tab window.sessionStorage ("h2_bridge_session_id").
+ * 2. Unified Startup (H2_CONNECT_REQ / H2_CONNECT_RES): sends previousSessionId from sessionStorage
+ *    and handles both sessionMode: "launched" (with launchedScope) and sessionMode: "direct".
+ * 3. H2_BRIDGE_READY detection on document_start / DOMContentLoaded.
+ * 4. Multi-drive & driveRoot switching (switchDriveRoot / requestWorkspaceTree / listFolder).
+ * 5. Lazy / concurrent file reads (readCloudFile / readMultipleCloudFiles via Promise.all).
+ * 6. Access mode (readwrite / readonly) and capability guards for saves and deletes.
+ * 7. Clean teardown on pagehide and explicit disconnect (H2_DISCONNECT_REQ).
  *
  * Official Documentation:
  * - React Hooks: https://react.dev/reference/react
  * - Window.postMessage: https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage
+ * - Window.sessionStorage: https://developer.mozilla.org/en-US/docs/Web/API/Window/sessionStorage
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -26,12 +27,13 @@ import {
   H2DriveStatus,
 } from '../types/ide';
 import {
+  H2_PROTOCOL,
+  H2_SESSION_STORAGE_KEY,
   H2BridgeClient,
   H2BridgeError,
   H2WorkspaceTree,
   H2SaveFileRes,
   H2DeleteFileRes,
-  getH2SessionId,
 } from '../utils/h2BridgeClient';
 import { inferMimeType } from '../utils/fileSystem';
 
@@ -41,7 +43,7 @@ interface UseExtensionBridgeProps {
     provider: CloudProvider,
     rootName: string,
     primaryRelativePath: string,
-    launchedItemType: 'folder' | 'file'
+    launchedItemType: 'folder' | 'file' | 'workspace'
   ) => void;
   onFolderChildrenLoaded?: (
     basePath: string,
@@ -58,8 +60,12 @@ interface UseExtensionBridgeProps {
 }
 
 /** Converts H2_WORKSPACE_TREE / H2_LIST_FOLDER_RES items into Monarch IDE CloudFile records */
-function mapTreePayloadToCloudFiles(treeMsg: H2WorkspaceTree): CloudFile[] {
+function mapTreePayloadToCloudFiles(
+  treeMsg: H2WorkspaceTree,
+  driveRootFlag = false
+): CloudFile[] {
   const defaultProvider = treeMsg.provider || 'cloud';
+  const effectiveDriveRoot = treeMsg.driveRoot ?? driveRootFlag;
   const folderItems: CloudFile[] = [];
   const fileItems: CloudFile[] = [];
   const seenKeys = new Set<string>();
@@ -81,6 +87,7 @@ function mapTreePayloadToCloudFiles(treeMsg: H2WorkspaceTree): CloudFile[] {
       contentLoaded: true,
       childrenLoaded: folder.childrenLoaded ?? true,
       isLoadingChildren: false,
+      driveRoot: effectiveDriveRoot,
       isDirectory: true,
       cloudProvider: provider,
       modifiedMs: folder.modifiedMs,
@@ -105,6 +112,7 @@ function mapTreePayloadToCloudFiles(treeMsg: H2WorkspaceTree): CloudFile[] {
       content: '',
       contentLoaded: false, // Metadata only; fetched lazily via H2_READ_FILE_REQ
       isLoadingContent: false,
+      driveRoot: effectiveDriveRoot,
       isDirectory: false,
       cloudProvider: provider,
       mimeType: file.mimeType,
@@ -121,7 +129,6 @@ function mapTreePayloadToCloudFiles(treeMsg: H2WorkspaceTree): CloudFile[] {
   (treeMsg.folders || []).forEach(f => pushFolder(f, defaultProvider));
   (treeMsg.files || []).forEach(f => pushFile(f, defaultProvider));
 
-  // If provider === "all" and treeMsg.drives carries per-drive folders/files buckets, extract them too
   if (treeMsg.drives && typeof treeMsg.drives === 'object') {
     for (const [driveKey, drivePayload] of Object.entries(treeMsg.drives)) {
       if (drivePayload && typeof drivePayload === 'object') {
@@ -149,7 +156,7 @@ export function useExtensionBridge({
   onItemDeleted,
   onItemDeleteError,
 }: UseExtensionBridgeProps = {}) {
-  const [sessionId, setSessionId] = useState<string | null>(() => getH2SessionId());
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [extensionStatus, setExtensionStatus] = useState<ExtensionStatus>('disconnected');
   const [handshakeInfo, setHandshakeInfo] = useState<ExtensionHandshakeInfo | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
@@ -159,6 +166,13 @@ export function useExtensionBridge({
 
   const clientRef = useRef<H2BridgeClient | null>(null);
   const hasBootedRef = useRef(false);
+  const manuallyDisconnectedRef = useRef(false);
+  const refusedReasonRef = useRef<string | null>(null);
+  const statusRef = useRef<ExtensionStatus>('disconnected');
+
+  useEffect(() => {
+    statusRef.current = extensionStatus;
+  }, [extensionStatus]);
 
   // Stable refs for parent callbacks
   const onWorkspaceTreeLoadedRef = useRef(onWorkspaceTreeLoaded);
@@ -234,7 +248,7 @@ export function useExtensionBridge({
       direction: 'incoming' | 'outgoing' | 'event',
       type: string,
       payload: any,
-      status: 'sent' | 'received' | 'acknowledged' | 'error' | 'timeout' = 'sent',
+      status: 'sent' | 'received' | 'error' | 'timeout' = 'sent',
       roundtripMs?: number,
       activeSid: string | null = null
     ) => {
@@ -269,113 +283,157 @@ export function useExtensionBridge({
     logMessageRef.current = logMessage;
   }, [logMessage]);
 
-  const handleIncomingTree = useCallback((treeMsg: H2WorkspaceTree, isIncremental = false) => {
-    if (!treeMsg.success) {
-      logMessageRef.current(
-        'event',
-        'H2_WORKSPACE_TREE_ERROR',
-        { error: treeMsg.error || 'Workspace tree load failed', requestId: treeMsg.requestId },
-        'error',
-        undefined,
-        treeMsg.sessionId
-      );
-      return;
-    }
+  const applyTreeResult = useCallback(
+    (
+      treeMsg: H2WorkspaceTree,
+      options?: {
+        isIncremental?: boolean;
+        driveRoot?: boolean;
+        fallbackProvider?: CloudProvider;
+        fallbackRootName?: string;
+        primaryRelativePathOverride?: string;
+        launchedItemTypeOverride?: 'folder' | 'file' | 'workspace';
+      }
+    ) => {
+      const isIncremental = Boolean(options?.isIncremental);
+      const driveRootFlag = treeMsg.driveRoot ?? Boolean(options?.driveRoot);
 
-    const provider = treeMsg.provider || 'cloud';
-    const rootName = treeMsg.rootName || 'Cloud Workspace';
-    const launchedItemType = treeMsg.launchedItemType || 'folder';
-    const primaryRelativePath = treeMsg.primaryRelativePath || '';
-    const mappedItems = mapTreePayloadToCloudFiles(treeMsg);
+      if (!treeMsg.success) {
+        logMessageRef.current(
+          'event',
+          'H2_WORKSPACE_TREE_ERROR',
+          { error: treeMsg.error || 'Workspace tree load failed', requestId: treeMsg.requestId },
+          'error',
+          undefined,
+          treeMsg.sessionId
+        );
+        return;
+      }
 
-    // Extract drive availability metadata if present (e.g. { pcloud: { connected, visible } })
-    let driveStatuses: Record<string, H2DriveStatus> | undefined;
-    if (treeMsg.drives && typeof treeMsg.drives === 'object') {
-      const candidate: Record<string, H2DriveStatus> = {};
-      for (const [k, v] of Object.entries(treeMsg.drives)) {
-        if (v && typeof v === 'object' && typeof v.connected === 'boolean') {
-          candidate[k] = { connected: v.connected, visible: Boolean(v.visible) };
+      const provider = treeMsg.provider || options?.fallbackProvider || 'cloud';
+      const rootName = treeMsg.rootName || options?.fallbackRootName || 'Cloud Workspace';
+      const launchedItemType =
+        options?.launchedItemTypeOverride || treeMsg.launchedItemType || 'folder';
+      const primaryRelativePath =
+        options?.primaryRelativePathOverride ?? treeMsg.primaryRelativePath ?? '';
+
+      const mappedItems = mapTreePayloadToCloudFiles(treeMsg, driveRootFlag);
+
+      // If launched on a single file and tree response didn't include it explicitly, synthesize metadata so it opens & lazy-reads
+      if (
+        !isIncremental &&
+        launchedItemType === 'file' &&
+        primaryRelativePath &&
+        !mappedItems.some(it => !it.isDirectory && it.path === primaryRelativePath)
+      ) {
+        const cleanRel = primaryRelativePath.replace(/^\/+|\/+$/g, '');
+        const parts = cleanRel.split('/');
+        const filename = parts[parts.length - 1] || cleanRel;
+        mappedItems.push({
+          id: `h2-${provider}-${cleanRel}`,
+          name: filename,
+          path: cleanRel,
+          parentRelativePath: parts.slice(0, -1).join('/'),
+          content: '',
+          contentLoaded: false,
+          isLoadingContent: false,
+          driveRoot: driveRootFlag,
+          isDirectory: false,
+          cloudProvider: provider,
+          mimeType: inferMimeType(filename),
+          isDirty: false,
+        });
+      }
+
+      let driveStatuses: Record<string, H2DriveStatus> | undefined;
+      if (treeMsg.drives && typeof treeMsg.drives === 'object') {
+        const candidate: Record<string, H2DriveStatus> = {};
+        for (const [k, v] of Object.entries(treeMsg.drives)) {
+          if (v && typeof v === 'object' && typeof v.connected === 'boolean') {
+            candidate[k] = { connected: v.connected, visible: Boolean(v.visible) };
+          }
+        }
+        if (Object.keys(candidate).length > 0) {
+          driveStatuses = candidate;
         }
       }
-      if (Object.keys(candidate).length > 0) {
-        driveStatuses = candidate;
-      }
-    }
 
-    setHandshakeInfo(prev =>
-      prev
-        ? {
-            ...prev,
-            provider: isIncremental ? prev.provider : provider,
-            rootName: isIncremental ? prev.rootName : rootName,
-            rootFolderId: isIncremental ? prev.rootFolderId : treeMsg.rootFolderId || prev.rootFolderId,
-            launchedItemType: treeMsg.launchedItemType || prev.launchedItemType,
-            primaryRelativePath: treeMsg.primaryRelativePath ?? prev.primaryRelativePath,
-            drives: driveStatuses || prev.drives,
-            stats: isIncremental ? prev.stats : treeMsg.stats || prev.stats,
-          }
-        : {
-            name: 'Clockie H2 Extension',
-            version: treeMsg.protocolVersion || '1.2',
-            sessionId: treeMsg.sessionId,
-            provider,
-            rootName,
-            rootFolderId: treeMsg.rootFolderId,
-            launchedItemType,
-            primaryRelativePath,
-            drives: driveStatuses,
-            stats: treeMsg.stats,
-            connectedAt: new Date().toLocaleTimeString(),
-          }
-    );
-
-    if (isIncremental) {
-      if (onFolderChildrenLoadedRef.current) {
-        onFolderChildrenLoadedRef.current(treeMsg.basePath || '', provider, mappedItems);
-      }
-    } else if (onWorkspaceTreeLoadedRef.current) {
-      onWorkspaceTreeLoadedRef.current(
-        mappedItems,
-        provider,
-        rootName,
-        primaryRelativePath,
-        launchedItemType
+      setHandshakeInfo(prev =>
+        prev
+          ? {
+              ...prev,
+              provider: isIncremental ? prev.provider : provider,
+              rootName: isIncremental ? prev.rootName : rootName,
+              rootFolderId: isIncremental ? prev.rootFolderId : treeMsg.rootFolderId || prev.rootFolderId,
+              driveRootActive: isIncremental ? prev.driveRootActive : driveRootFlag,
+              drives: driveStatuses || prev.drives,
+              stats: isIncremental ? prev.stats : treeMsg.stats || prev.stats,
+            }
+          : prev
       );
-    }
-  }, []);
 
-  /** Type 10a/10b: Gracefully disconnect active session */
+      if (isIncremental) {
+        onFolderChildrenLoadedRef.current?.(treeMsg.basePath || '', provider, mappedItems);
+      } else {
+        onWorkspaceTreeLoadedRef.current?.(
+          mappedItems,
+          provider,
+          rootName,
+          primaryRelativePath,
+          launchedItemType
+        );
+      }
+    },
+    []
+  );
+
+  /** Type 9a/9b: Explicit disconnect + sessionStorage cleanup */
   const stopBridge = useCallback(async () => {
+    manuallyDisconnectedRef.current = true;
     const activeSid = clientRef.current?.sessionId || sessionId;
     if (clientRef.current) {
       await clientRef.current.disconnect();
       clientRef.current = null;
+    } else {
+      try {
+        window.sessionStorage.removeItem(H2_SESSION_STORAGE_KEY);
+      } catch {
+        // Ignore storage errors
+      }
     }
     setExtensionStatus('disconnected');
     setHandshakeInfo(null);
-    setSessionId(getH2SessionId());
+    setSessionId(null);
     logMessageRef.current(
       'event',
       'H2_SYSTEM_EVENT',
-      { message: 'Extension bridge session closed' },
+      { message: 'Extension bridge session closed (H2_DISCONNECT_REQ)' },
       'sent',
       undefined,
       activeSid
     );
   }, [sessionId]);
 
-  /** Type 2a/2: Request full or filtered workspace tree on demand */
+  /** Type 2a: Request workspace tree (supports driveRoot switching and depth limits) */
   const requestWorkspaceTree = useCallback(
     async ({
       provider,
+      driveRoot = false,
       basePath,
       baseFolderId,
       maxDepth = 2,
+      primaryRelativePathOverride,
+      launchedItemTypeOverride,
+      fallbackRootName,
     }: {
       provider?: CloudProvider;
+      driveRoot?: boolean;
       basePath?: string;
       baseFolderId?: string;
       maxDepth?: number;
+      primaryRelativePathOverride?: string;
+      launchedItemTypeOverride?: 'folder' | 'file' | 'workspace';
+      fallbackRootName?: string;
     } = {}) => {
       const client = clientRef.current;
       if (!client || !client.sessionId) return;
@@ -383,39 +441,52 @@ export function useExtensionBridge({
       try {
         const res = await client.requestTree({
           provider,
+          driveRoot,
           basePath,
           baseFolderId,
           maxDepth,
         });
-        // onTree already processes H2_WORKSPACE_TREE replies; only handle non-H2_WORKSPACE_TREE here
-        if (res && res.type !== 'H2_WORKSPACE_TREE') {
-          handleIncomingTree(res, Boolean(basePath));
-        }
+        applyTreeResult(res, {
+          isIncremental: Boolean(basePath),
+          driveRoot,
+          fallbackProvider: provider,
+          fallbackRootName,
+          primaryRelativePathOverride,
+          launchedItemTypeOverride,
+        });
       } catch (err: any) {
         logMessageRef.current(
           'event',
           'H2_WORKSPACE_TREE_ERROR',
-          { provider, basePath, error: err?.message || 'Tree request failed' },
+          { provider, driveRoot, basePath, error: err?.message || 'Tree request failed' },
           'error',
           undefined,
           client.sessionId
         );
       }
     },
-    [handleIncomingTree]
+    [applyTreeResult]
   );
 
-  /**
-   * Connects using either Launched Mode (if #h2Session or explicitSessionId is supplied)
-   * or Direct Mode (H2_CONNECT_REQ when forceDirect is true or no h2Session exists in URL).
-   */
+  /** Switch to full root of any connected drive (driveRoot: true) */
+  const switchDriveRoot = useCallback(
+    async (provider: CloudProvider, maxDepth = 2) => {
+      await requestWorkspaceTree({
+        provider,
+        driveRoot: true,
+        maxDepth,
+        fallbackRootName: provider === 'all' ? 'All Connected Drives' : `${provider} Root`,
+      });
+    },
+    [requestWorkspaceTree]
+  );
+
+  /** Unified v1.3 connection via H2_CONNECT_REQ (replaces launched handshake + direct connect) */
   const startBridge = useCallback(
-    async (explicitSessionId?: string, options?: { forceDirect?: boolean; silentTimeout?: boolean }) => {
-      const forceDirect = Boolean(options?.forceDirect);
+    async (options?: { silentTimeout?: boolean }) => {
       const silentTimeout = Boolean(options?.silentTimeout);
-      const targetSid = forceDirect
-        ? null
-        : (explicitSessionId ?? getH2SessionId())?.trim() || null;
+      manuallyDisconnectedRef.current = false;
+      refusedReasonRef.current = null;
 
       if (clientRef.current) {
         clientRef.current.destroy();
@@ -425,9 +496,9 @@ export function useExtensionBridge({
       setConnectionError(null);
       setConnectionReasonCode(null);
       setExtensionStatus('connecting');
-      setSessionId(targetSid);
+      setSessionId(null);
 
-      const client = new H2BridgeClient(targetSid, {
+      const client = new H2BridgeClient({
         onOutgoing: (type, envelope) => {
           logMessageRef.current(
             'outgoing',
@@ -435,7 +506,7 @@ export function useExtensionBridge({
             envelope,
             'sent',
             undefined,
-            envelope.sessionId || clientRef.current?.sessionId || targetSid
+            envelope.sessionId || clientRef.current?.sessionId || null
           );
         },
         onIncoming: (type, envelope, roundtripMs) => {
@@ -446,134 +517,141 @@ export function useExtensionBridge({
             envelope,
             status,
             roundtripMs,
-            envelope?.sessionId || clientRef.current?.sessionId || targetSid
+            envelope?.sessionId || clientRef.current?.sessionId || null
           );
         },
         onTimeout: (type, requestId, errorMessage) => {
           logMessageRef.current(
             'event',
             `${type}_TIMEOUT`,
-            { requestId, error: errorMessage, sessionId: clientRef.current?.sessionId || targetSid },
+            { requestId, error: errorMessage, sessionId: clientRef.current?.sessionId || null },
             'timeout',
             undefined,
-            clientRef.current?.sessionId || targetSid
+            clientRef.current?.sessionId || null
           );
         },
       });
 
-      client.onTree = treeMsg => handleIncomingTree(treeMsg, false);
       clientRef.current = client;
 
       try {
         const startTs = performance.now();
+        const res = await client.connect('FreshFood Rocks - Monarch IDE');
+        const latencyMs = Math.round(performance.now() - startTs);
 
-        if (targetSid) {
-          // Launched Mode (v1.1 / v1.2)
-          const res = await client.handshake('FreshFood Rocks - Monarch IDE');
-          const latencyMs = Math.round(performance.now() - startTs);
+        if (res.success && res.sessionId) {
+          const scope = res.launchedScope || null;
+          const effectiveProvider = scope?.provider || res.provider || 'all';
+          const effectiveRootName = scope?.rootName || res.rootName || 'Cloud Workspace';
+          const effectiveItemType = scope?.launchedItemType || res.launchedItemType || 'folder';
+          const effectivePrimaryPath = scope?.primaryRelativePath ?? res.primaryRelativePath ?? '';
 
-          if (res.success) {
-            setExtensionStatus('connected');
-            setSessionId(res.sessionId || targetSid);
-            setHandshakeInfo({
-              name: 'Clockie H2 Extension',
-              version: res.negotiatedVersion || '1.2',
-              sessionId: res.sessionId || targetSid,
-              sessionMode: res.sessionMode || 'launched',
-              accessMode: res.accessMode || 'readwrite',
-              provider: res.provider,
-              rootName: res.rootName,
-              launchedItemType: res.launchedItemType,
-              primaryRelativePath: res.primaryRelativePath,
-              drives: res.drives,
-              capabilities: res.capabilities,
-              connectedAt: new Date().toLocaleTimeString(),
-              latencyMs,
-            });
-          } else {
-            setExtensionStatus('disconnected');
-            setConnectionError(res.error || 'Handshake failed');
-            setConnectionReasonCode(res.reasonCode || null);
-          }
+          setExtensionStatus('connected');
+          setSessionId(res.sessionId);
+          setHandshakeInfo({
+            name: 'Clockie H2 Extension',
+            version: res.negotiatedVersion || '1.3',
+            sessionId: res.sessionId,
+            sessionMode: res.sessionMode,
+            accessMode: res.accessMode || 'readwrite',
+            provider: effectiveProvider,
+            rootName: effectiveRootName,
+            rootFolderId: scope?.rootFolderId,
+            launchedItemType: effectiveItemType,
+            primaryRelativePath: effectivePrimaryPath,
+            launchedScope: scope,
+            driveRootActive: false,
+            drives: res.drives,
+            capabilities: res.capabilities,
+            connectedAt: new Date().toLocaleTimeString(),
+            latencyMs,
+          });
+
+          // Fetch workspace tree on demand (launchedScope in launched mode, or top-level in direct mode)
+          await requestWorkspaceTree({
+            provider: effectiveProvider,
+            driveRoot: false,
+            maxDepth: 2,
+            primaryRelativePathOverride: effectivePrimaryPath,
+            launchedItemTypeOverride: effectiveItemType,
+            fallbackRootName: effectiveRootName,
+          });
         } else {
-          // Direct Mode (v1.2): request new session for this authorized origin
-          const res = await client.connectDirect('FreshFood Rocks - Monarch IDE');
-          const latencyMs = Math.round(performance.now() - startTs);
-
-          if (res.success && res.sessionId) {
-            setExtensionStatus('connected');
-            setSessionId(res.sessionId);
-            setHandshakeInfo({
-              name: 'Clockie H2 Extension',
-              version: res.negotiatedVersion || '1.2',
-              sessionId: res.sessionId,
-              sessionMode: res.sessionMode || 'direct',
-              accessMode: res.accessMode || 'readwrite',
-              provider: res.provider || 'all',
-              rootName: res.rootName || 'All Connected Drives',
-              drives: res.drives,
-              capabilities: res.capabilities,
-              connectedAt: new Date().toLocaleTimeString(),
-              latencyMs,
-            });
-
-            // Immediately request top-level depth-limited tree (maxDepth: 2)
-            await requestWorkspaceTree({
-              provider: res.provider || 'all',
-              maxDepth: 2,
-            });
-          } else {
-            setExtensionStatus('disconnected');
-            setSessionId(null);
-            setConnectionError(res.error || 'Direct connection refused');
-            setConnectionReasonCode(res.reasonCode || null);
-          }
+          setExtensionStatus('disconnected');
+          setSessionId(null);
+          setConnectionError(res.error || 'Connection refused');
+          setConnectionReasonCode(res.reasonCode || null);
+          refusedReasonRef.current = res.reasonCode || 'REFUSED';
         }
       } catch (err: any) {
         const reasonCode = err instanceof H2BridgeError ? err.reasonCode : null;
         setExtensionStatus('disconnected');
-        if (!targetSid) {
-          setSessionId(null);
-        }
+        setSessionId(null);
 
-        // Ignore background boot timeout gracefully when opened standalone without the extension
         if (reasonCode === 'TIMEOUT' && silentTimeout) {
           return;
         }
 
+        refusedReasonRef.current = reasonCode;
         setConnectionError(err?.message || 'Bridge connection failed');
         setConnectionReasonCode(reasonCode);
 
         logMessageRef.current(
           'event',
-          targetSid ? 'H2_HANDSHAKE_FAILED' : 'H2_CONNECT_REFUSED',
-          {
-            sessionId: targetSid,
-            reasonCode,
-            error: err?.message || 'Connection failed',
-          },
+          'H2_CONNECT_REFUSED',
+          { reasonCode, error: err?.message || 'Connection failed' },
           'error',
           undefined,
-          targetSid
+          null
         );
       }
     },
-    [handleIncomingTree, requestWorkspaceTree]
+    [requestWorkspaceTree]
   );
 
-  // Auto-connect on mount using v1.2 dual mode (Launched if #h2Session exists, else Direct)
+  // Boot connect + listen for H2_BRIDGE_READY (document_start / DOMContentLoaded) + pagehide teardown
   useEffect(() => {
     if (!hasBootedRef.current) {
       hasBootedRef.current = true;
-      const bootSid = getH2SessionId();
-      if (bootSid) {
-        startBridge(bootSid);
-      } else {
-        startBridge(undefined, { forceDirect: true, silentTimeout: true });
-      }
+      startBridge({ silentTimeout: true });
     }
 
+    const handleReadyEvent = (event: MessageEvent) => {
+      if (event.source !== window) return;
+      const d = event.data;
+      if (
+        d &&
+        typeof d === 'object' &&
+        d.protocol === H2_PROTOCOL &&
+        d.__h2FromExtension === true &&
+        d.type === 'H2_BRIDGE_READY'
+      ) {
+        // If we aren't actively connected/connecting and extension wasn't explicitly refused or manually stopped, auto-connect
+        if (
+          statusRef.current === 'disconnected' &&
+          !manuallyDisconnectedRef.current &&
+          !refusedReasonRef.current
+        ) {
+          startBridge({ silentTimeout: true });
+        }
+      }
+    };
+
+    const handlePageHide = () => {
+      // Tear down listeners/timers cleanly on refresh/close without wiping sessionStorage
+      // so F5 reloads can still forward previousSessionId in H2_CONNECT_REQ.
+      if (clientRef.current) {
+        clientRef.current.destroy();
+        clientRef.current = null;
+      }
+    };
+
+    window.addEventListener('message', handleReadyEvent);
+    window.addEventListener('pagehide', handlePageHide);
+
     return () => {
+      window.removeEventListener('message', handleReadyEvent);
+      window.removeEventListener('pagehide', handlePageHide);
       if (clientRef.current) {
         clientRef.current.destroy();
         clientRef.current = null;
@@ -587,35 +665,39 @@ export function useExtensionBridge({
       const client = clientRef.current;
       if (!client) return;
 
+      const useDriveRoot = Boolean(folder.driveRoot ?? handshakeInfo?.driveRootActive);
       try {
         const res = await client.listFolder({
           provider: folder.cloudProvider,
+          driveRoot: useDriveRoot,
           basePath: folder.path,
           baseFolderId: folder.folderId,
           maxDepth,
         });
-        // Merge incrementally into the existing tree
-        handleIncomingTree(
+        applyTreeResult(
           {
             ...res,
             basePath: res.basePath ?? folder.path,
             provider: res.provider || folder.cloudProvider,
+            driveRoot: useDriveRoot,
           },
-          true
+          {
+            isIncremental: true,
+            driveRoot: useDriveRoot,
+            fallbackProvider: folder.cloudProvider,
+          }
         );
       } catch (err: any) {
-        if (onFolderChildrenLoadErrorRef.current) {
-          onFolderChildrenLoadErrorRef.current(
-            folder.path,
-            err?.message || 'Failed to expand folder'
-          );
-        }
+        onFolderChildrenLoadErrorRef.current?.(
+          folder.path,
+          err?.message || 'Failed to expand folder'
+        );
       }
     },
-    [handleIncomingTree]
+    [applyTreeResult, handshakeInfo?.driveRootActive]
   );
 
-  /** Type 4/5: Lazy individual file content read */
+  /** Type 3/4: Lazy individual file content read */
   const readCloudFile = useCallback(
     async (file: CloudFile, encodingOverride?: 'utf-8' | 'base64') => {
       const client = clientRef.current;
@@ -623,13 +705,15 @@ export function useExtensionBridge({
 
       const inferredEncoding: 'utf-8' | 'base64' | undefined =
         encodingOverride || file.encoding || (file.isBinary ? 'base64' : 'utf-8');
+      const useDriveRoot = Boolean(file.driveRoot ?? handshakeInfo?.driveRootActive);
 
       try {
         const res = await client.readFile(
           file.path,
           file.cloudFileId,
           inferredEncoding,
-          file.cloudProvider
+          file.cloudProvider,
+          useDriveRoot
         );
         const isBinary = res.contentType === 'binary' || res.encoding === 'base64';
         const resolvedMime = res.mimeType || file.mimeType || inferMimeType(file.name);
@@ -641,39 +725,35 @@ export function useExtensionBridge({
             : `data:${resolvedMime || 'application/octet-stream'};base64,${res.content}`;
         }
 
-        if (onFileContentLoadedRef.current) {
-          onFileContentLoadedRef.current(file.path, {
-            cloudFileId: res.fileId || file.cloudFileId,
-            parentId: res.parentFolderId || file.parentId,
-            cloudProvider: res.provider || file.cloudProvider,
-            name: res.filename || file.name,
-            mimeType: resolvedMime,
-            contentType: res.contentType,
-            encoding: res.encoding,
-            content: res.content ?? '',
-            size: res.sizeBytes,
-            modifiedMs: res.modifiedMs,
-            lastModified: res.modifiedMs
-              ? new Date(res.modifiedMs).toLocaleTimeString()
-              : new Date().toLocaleTimeString(),
-            isBinary,
-            binaryUrl,
-            contentLoaded: true,
-            isLoadingContent: false,
-            loadError: undefined,
-            isDirty: false,
-          });
-        }
+        onFileContentLoadedRef.current?.(file.path, {
+          cloudFileId: res.fileId || file.cloudFileId,
+          parentId: res.parentFolderId || file.parentId,
+          cloudProvider: res.provider || file.cloudProvider,
+          name: res.filename || file.name,
+          mimeType: resolvedMime,
+          contentType: res.contentType,
+          encoding: res.encoding,
+          content: res.content ?? '',
+          size: res.sizeBytes,
+          modifiedMs: res.modifiedMs,
+          lastModified: res.modifiedMs
+            ? new Date(res.modifiedMs).toLocaleTimeString()
+            : new Date().toLocaleTimeString(),
+          isBinary,
+          binaryUrl,
+          contentLoaded: true,
+          isLoadingContent: false,
+          loadError: undefined,
+          isDirty: false,
+        });
       } catch (err: any) {
-        if (onFileContentLoadErrorRef.current) {
-          onFileContentLoadErrorRef.current(file.path, err?.message || 'Failed to read file');
-        }
+        onFileContentLoadErrorRef.current?.(file.path, err?.message || 'Failed to read file');
       }
     },
-    []
+    [handshakeInfo?.driveRootActive]
   );
 
-  /** Type 4/5 Concurrent Batch: Fetch multiple files simultaneously via Promise.all */
+  /** Type 3/4 Concurrent Batch: Fetch multiple files simultaneously via Promise.all */
   const readMultipleCloudFiles = useCallback(
     async (filesToRead: CloudFile[]) => {
       const client = clientRef.current;
@@ -685,6 +765,7 @@ export function useExtensionBridge({
           fileId: f.cloudFileId,
           encoding: f.encoding || (f.isBinary ? 'base64' : 'utf-8'),
           provider: f.cloudProvider,
+          driveRoot: Boolean(f.driveRoot ?? handshakeInfo?.driveRootActive),
         }))
       );
 
@@ -722,10 +803,10 @@ export function useExtensionBridge({
         });
       });
     },
-    []
+    [handshakeInfo?.driveRootActive]
   );
 
-  /** Type 6/7: Save existing file or create new file/subdirectories (guarded by accessMode & capability) */
+  /** Type 5/6: Save existing file or create new file/subdirectories (guarded by accessMode & capability) */
   const saveCloudFile = useCallback(
     async (file: CloudFile) => {
       const client = clientRef.current;
@@ -760,6 +841,7 @@ export function useExtensionBridge({
 
         const res = await client.saveFile({
           provider: file.cloudProvider,
+          driveRoot: Boolean(file.driveRoot ?? handshakeInfo?.driveRootActive),
           relativePath: file.path,
           fileId: file.cloudFileId,
           mimeType: file.mimeType || inferMimeType(file.name),
@@ -793,10 +875,11 @@ export function useExtensionBridge({
     [saveCloudFile]
   );
 
-  /** Type 8/9: Delete file or folder (guarded by accessMode) */
+  /** Type 7/8: Delete file or folder (guarded by accessMode) */
   const deleteCloudItem = useCallback(
     async ({
       provider,
+      driveRoot,
       itemType,
       relativePath,
       fileId,
@@ -804,6 +887,7 @@ export function useExtensionBridge({
       permanent = false,
     }: {
       provider?: CloudProvider;
+      driveRoot?: boolean;
       itemType: 'file' | 'folder';
       relativePath: string;
       fileId?: string;
@@ -827,6 +911,7 @@ export function useExtensionBridge({
       try {
         const res = await client.deleteItem({
           provider,
+          driveRoot: Boolean(driveRoot ?? handshakeInfo?.driveRootActive),
           itemType,
           relativePath,
           fileId,
@@ -855,6 +940,7 @@ export function useExtensionBridge({
     startBridge,
     stopBridge,
     requestWorkspaceTree,
+    switchDriveRoot,
     expandFolder,
     readCloudFile,
     readMultipleCloudFiles,

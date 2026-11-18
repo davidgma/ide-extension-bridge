@@ -1,15 +1,16 @@
 /**
  * Main Application Entry & Workspace Orchestrator for FreshFood Rocks - Monarch IDE.
  * Coordinates file state, open editor tabs, Monaco editor preferences, and
- * Clockie H2 Bridge Protocol v1.2 (H2_CLOUD_BRIDGE) communication:
- * - Launched Mode (#h2Session) and Direct Mode (H2_CONNECT_REQ)
- * - Depth-limited multi-drive trees & lazy folder expansion (childrenLoaded)
+ * Clockie H2 Bridge Protocol v1.3 (H2_CLOUD_BRIDGE) communication:
+ * - Zero-URL session binding via per-tab window.sessionStorage
+ * - Unified H2_CONNECT_REQ/RES startup (launchedScope & direct modes)
+ * - Depth-limited multi-drive & driveRoot switching + lazy folder expansion
  * - Lazy / concurrent file reads, read-only capability guards, and clean disconnect
  *
  * Official Documentation:
  * - React: https://react.dev/reference/react
  * - Window.postMessage: https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage
- * - FileReader Web API: https://developer.mozilla.org/en-US/docs/Web/API/FileReader
+ * - Window.sessionStorage: https://developer.mozilla.org/en-US/docs/Web/API/Window/sessionStorage
  */
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -78,7 +79,7 @@ export default function App() {
     }, 3500);
   }, []);
 
-  // Clockie H2 Bridge Protocol v1.2 (H2_CLOUD_BRIDGE) hook
+  // Clockie H2 Bridge Protocol v1.3 (H2_CLOUD_BRIDGE) hook
   const {
     sessionId,
     extensionStatus,
@@ -90,6 +91,7 @@ export default function App() {
     startBridge,
     stopBridge,
     requestWorkspaceTree,
+    switchDriveRoot,
     expandFolder,
     readCloudFile,
     saveCloudFile,
@@ -143,7 +145,6 @@ export default function App() {
         const existingMap = new Map<string, CloudFile>();
         for (const item of prev) {
           const key = `${item.isDirectory ? 'dir' : 'file'}:${item.cloudProvider}:${item.path}`;
-          // Mark the expanded directory as loaded
           if (item.isDirectory && item.path === cleanBase && (!provider || item.cloudProvider === provider)) {
             existingMap.set(key, {
               ...item,
@@ -155,7 +156,6 @@ export default function App() {
           }
         }
 
-        // Merge newly listed folders and files while preserving already-loaded file content
         for (const child of childrenItems) {
           const key = `${child.isDirectory ? 'dir' : 'file'}:${child.cloudProvider}:${child.path}`;
           const prevItem = existingMap.get(key);
@@ -289,7 +289,7 @@ export default function App() {
     readCloudFileRef.current = readCloudFile;
   }, [readCloudFile]);
 
-  // Derived v1.2 permission / capability flags
+  // Derived v1.3 permission / capability flags
   const isReadOnly = extensionStatus === 'connected' && handshakeInfo?.accessMode === 'readonly';
   const canSave = !isReadOnly && (extensionStatus !== 'connected' || handshakeInfo?.capabilities?.save !== false);
   const canCreateFiles = !isReadOnly && (extensionStatus !== 'connected' || handshakeInfo?.capabilities?.createFiles !== false);
@@ -344,7 +344,7 @@ export default function App() {
     [files, readCloudFile]
   );
 
-  // Lazy folder expansion (childrenLoaded === false) via H2_LIST_FOLDER_REQ
+  // Lazy folder expansion via H2_LIST_FOLDER_REQ
   const handleExpandFolder = useCallback(
     (folder: CloudFile) => {
       setFiles(prev =>
@@ -357,21 +357,37 @@ export default function App() {
     [expandFolder]
   );
 
-  // Multi-drive switcher in Direct Mode
+  // Switch connected drives (passes driveRoot: true so launched sessions can also browse full drive roots)
   const handleSelectDrive = useCallback(
     (drive: CloudProvider) => {
       setSelectedDrive(drive);
-      requestWorkspaceTree({ provider: drive, maxDepth: 2 });
+      switchDriveRoot(drive, 2);
     },
-    [requestWorkspaceTree]
+    [switchDriveRoot]
   );
+
+  // Return from full driveRoot view back to originally launchedScope
+  const handleReturnToLaunchedScope = useCallback(() => {
+    const scope = handshakeInfo?.launchedScope;
+    if (!scope) return;
+    setSelectedDrive(scope.provider);
+    requestWorkspaceTree({
+      provider: scope.provider,
+      driveRoot: false,
+      maxDepth: 2,
+      primaryRelativePathOverride: scope.primaryRelativePath || '',
+      launchedItemTypeOverride: scope.launchedItemType,
+      fallbackRootName: scope.rootName,
+    });
+  }, [handshakeInfo?.launchedScope, requestWorkspaceTree]);
 
   const handleRefreshTree = useCallback(() => {
     requestWorkspaceTree({
       provider: selectedDrive || handshakeInfo?.provider || 'all',
+      driveRoot: Boolean(handshakeInfo?.driveRootActive),
       maxDepth: 2,
     });
-  }, [selectedDrive, handshakeInfo?.provider, requestWorkspaceTree]);
+  }, [selectedDrive, handshakeInfo?.provider, handshakeInfo?.driveRootActive, requestWorkspaceTree]);
 
   // Retry failed lazy file load
   const handleRetryLoadFile = useCallback(
@@ -502,6 +518,7 @@ export default function App() {
         parentRelativePath,
         content,
         contentLoaded: true,
+        driveRoot: Boolean(handshakeInfo?.driveRootActive),
         mimeType: inferMimeType(name),
         contentType: 'text',
         encoding: 'utf-8',
@@ -523,7 +540,16 @@ export default function App() {
         notify(`Created ${cleanPath}`);
       }
     },
-    [isReadOnly, canCreateFiles, selectedDrive, cloudProvider, extensionStatus, saveCloudFile, notify]
+    [
+      isReadOnly,
+      canCreateFiles,
+      selectedDrive,
+      cloudProvider,
+      handshakeInfo?.driveRootActive,
+      extensionStatus,
+      saveCloudFile,
+      notify,
+    ]
   );
 
   // Create directory entry
@@ -555,6 +581,7 @@ export default function App() {
           content: '',
           contentLoaded: true,
           childrenLoaded: true,
+          driveRoot: Boolean(handshakeInfo?.driveRootActive),
           isDirectory: true,
           cloudProvider: targetProvider,
           lastModified: new Date().toLocaleTimeString(),
@@ -563,7 +590,7 @@ export default function App() {
       });
       notify(`Created folder ${cleanPath}`);
     },
-    [isReadOnly, canCreateFolders, selectedDrive, cloudProvider, notify]
+    [isReadOnly, canCreateFolders, selectedDrive, cloudProvider, handshakeInfo?.driveRootActive, notify]
   );
 
   // Delete file
@@ -580,6 +607,7 @@ export default function App() {
       if (extensionStatus === 'connected') {
         deleteCloudItem({
           provider: target.cloudProvider,
+          driveRoot: Boolean(target.driveRoot ?? handshakeInfo?.driveRootActive),
           itemType: 'file',
           relativePath: target.path,
           fileId: target.cloudFileId,
@@ -591,7 +619,7 @@ export default function App() {
         notify(`Deleted ${target.path}`);
       }
     },
-    [isReadOnly, canDeleteFiles, files, extensionStatus, deleteCloudItem, handleCloseTab, notify]
+    [isReadOnly, canDeleteFiles, files, extensionStatus, handshakeInfo?.driveRootActive, deleteCloudItem, handleCloseTab, notify]
   );
 
   // Delete folder & descendants
@@ -608,6 +636,7 @@ export default function App() {
       if (extensionStatus === 'connected') {
         deleteCloudItem({
           provider: folderProvider || cloudProvider,
+          driveRoot: Boolean(handshakeInfo?.driveRootActive),
           itemType: 'folder',
           relativePath: cleanPath,
           folderId,
@@ -627,7 +656,17 @@ export default function App() {
         notify(`Deleted folder ${cleanPath}`);
       }
     },
-    [isReadOnly, canDeleteFolders, extensionStatus, deleteCloudItem, cloudProvider, files, activeTabId, notify]
+    [
+      isReadOnly,
+      canDeleteFolders,
+      extensionStatus,
+      handshakeInfo?.driveRootActive,
+      deleteCloudItem,
+      cloudProvider,
+      files,
+      activeTabId,
+      notify,
+    ]
   );
 
   // Rename file locally
@@ -683,6 +722,7 @@ export default function App() {
               parentRelativePath: 'uploads',
               content: base64Content,
               contentLoaded: true,
+              driveRoot: Boolean(handshakeInfo?.driveRootActive),
               isBinary: true,
               contentType: 'binary',
               encoding: 'base64',
@@ -712,6 +752,7 @@ export default function App() {
               parentRelativePath: 'uploads',
               content: text,
               contentLoaded: true,
+              driveRoot: Boolean(handshakeInfo?.driveRootActive),
               contentType: 'text',
               encoding: 'utf-8',
               mimeType: resolvedMime,
@@ -734,7 +775,7 @@ export default function App() {
       notify(`Imported ${fileList.length} files`);
       e.target.value = '';
     },
-    [isReadOnly, canCreateFiles, selectedDrive, cloudProvider, notify]
+    [isReadOnly, canCreateFiles, selectedDrive, cloudProvider, handshakeInfo?.driveRootActive, notify]
   );
 
   // Export workspace as JSON
@@ -743,7 +784,7 @@ export default function App() {
       workspace: workspaceName,
       domain: 'ide.freshfood.rocks',
       protocol: 'H2_CLOUD_BRIDGE',
-      protocolVersion: '1.2',
+      protocolVersion: '1.3',
       exportedAt: new Date().toISOString(),
       provider: cloudProvider,
       files: files
@@ -828,7 +869,7 @@ export default function App() {
         onOpenShortcutsModal={() => setIsShortcutsOpen(true)}
       />
 
-      {/* Graceful Direct Mode Connection Refusal Banner */}
+      {/* Graceful Connection Refusal Notice */}
       {connectionError && extensionStatus !== 'connected' && (
         <div className="px-4 py-1.5 bg-red-950/70 border-b border-red-500/40 text-red-100 text-xs flex items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-2">
@@ -840,10 +881,10 @@ export default function App() {
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <button
-              onClick={() => startBridge(undefined, { forceDirect: true })}
+              onClick={() => startBridge()}
               className="px-2.5 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-medium transition"
             >
-              Retry Direct Connect
+              Retry Connect
             </button>
             <button
               onClick={dismissConnectionError}
@@ -872,7 +913,10 @@ export default function App() {
             canDeleteFolders={canDeleteFolders}
             drives={handshakeInfo?.drives}
             selectedDrive={selectedDrive}
+            launchedScope={handshakeInfo?.launchedScope}
+            driveRootActive={handshakeInfo?.driveRootActive}
             onSelectDrive={handleSelectDrive}
+            onReturnToLaunchedScope={handleReturnToLaunchedScope}
             onRefreshTree={handleRefreshTree}
             onExpandFolder={handleExpandFolder}
             onSelectFile={handleSelectFile}
@@ -930,8 +974,7 @@ export default function App() {
               connectionReasonCode={connectionReasonCode}
               onClose={() => setIsDebuggerOpen(false)}
               onClearLogs={clearLogs}
-              onConnectWithSession={sid => startBridge(sid)}
-              onConnectDirect={() => startBridge(undefined, { forceDirect: true })}
+              onConnectBridge={() => startBridge()}
             />
 
             {/* Output / Terminal Drawer */}
@@ -977,8 +1020,7 @@ export default function App() {
         connectionError={connectionError}
         connectionReasonCode={connectionReasonCode}
         messagesLog={messagesLog}
-        onStartBridge={sid => startBridge(sid)}
-        onConnectDirect={() => startBridge(undefined, { forceDirect: true })}
+        onConnectBridge={() => startBridge()}
         onStopBridge={stopBridge}
         onClearLogs={clearLogs}
       />

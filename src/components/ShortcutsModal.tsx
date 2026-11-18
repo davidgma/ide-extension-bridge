@@ -1,5 +1,5 @@
 /**
- * Keyboard Shortcuts & H2_CLOUD_BRIDGE v1.2 Reference Modal.
+ * Keyboard Shortcuts & H2_CLOUD_BRIDGE v1.3 Reference Modal.
  *
  * Official Documentation:
  * - React: https://react.dev/reference/react
@@ -38,7 +38,7 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
         <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 bg-zinc-900">
           <div className="flex items-center gap-2 text-white font-bold text-base">
             <BookOpen className="w-5 h-5 text-emerald-400" />
-            <span>Monarch IDE & H2_CLOUD_BRIDGE v1.2 Docs</span>
+            <span>Monarch IDE & H2_CLOUD_BRIDGE v1.3 Docs</span>
           </div>
           <button onClick={onClose} className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white">
             <X className="w-5 h-5" />
@@ -49,7 +49,7 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
           <div className="p-4 rounded-xl bg-emerald-950/20 border border-emerald-500/30 text-emerald-300">
             <h4 className="font-semibold text-white mb-1 flex items-center gap-1.5">
               <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              <span>Production Domain: ide.freshfood.rocks (v1.2)</span>
+              <span>Production Domain: ide.freshfood.rocks (v1.3)</span>
             </h4>
             <p className="text-zinc-300 leading-relaxed text-[11.5px]">
               This Single Page Application runs at{' '}
@@ -61,7 +61,7 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
               >
                 https://ide.freshfood.rocks
               </a>
-              , supporting both Launched Mode (<code className="font-mono text-emerald-300">#h2Session=&lt;id&gt;</code>) and Direct Mode on authorised origins.
+              , connecting cleanly via unified <code className="font-mono text-emerald-300">H2_CONNECT_REQ</code> with per-tab <code className="font-mono text-blue-300">sessionStorage</code> binding and clean URLs.
             </p>
           </div>
 
@@ -85,17 +85,17 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
           <div>
             <h4 className="font-semibold text-white text-sm mb-2 flex items-center gap-1.5">
               <Cloud className="w-4 h-4 text-emerald-400" />
-              <span>Clockie H2 Bridge Protocol v1.2 (H2_CLOUD_BRIDGE)</span>
+              <span>Clockie H2 Bridge Protocol v1.3 (H2_CLOUD_BRIDGE)</span>
             </h4>
             <ul className="list-disc pl-5 space-y-1.5 text-zinc-400 text-[11.5px] leading-relaxed">
               <li>
-                <strong className="text-zinc-200 font-mono">H2_CONNECT_REQ / H2_CONNECT_RES</strong>: Direct connection from authorised origins with sessionId, accessMode, and connected drives.
+                <strong className="text-zinc-200 font-mono">H2_BRIDGE_READY</strong>: Emitted at document_start & DOMContentLoaded when extension listeners attach.
               </li>
               <li>
-                <strong className="text-zinc-200 font-mono">H2_HANDSHAKE_REQ / H2_HANDSHAKE_RES</strong>: Launched connection when URL contains #h2Session.
+                <strong className="text-zinc-200 font-mono">H2_CONNECT_REQ / H2_CONNECT_RES</strong>: Unified connection returning sessionMode (&quot;launched&quot; | &quot;direct&quot;), launchedScope, accessMode, and connected drives.
               </li>
               <li>
-                <strong className="text-zinc-200 font-mono">H2_WORKSPACE_TREE_REQ / H2_LIST_FOLDER_REQ</strong>: Depth-limited and lazy-expanded multi-drive trees (childrenLoaded).
+                <strong className="text-zinc-200 font-mono">H2_WORKSPACE_TREE_REQ / H2_LIST_FOLDER_REQ</strong>: Depth-limited, multi-drive & driveRoot-switchable folder trees (childrenLoaded).
               </li>
               <li>
                 <strong className="text-zinc-200 font-mono">H2_READ_FILE_REQ / H2_READ_FILE_RES</strong>: Lazy and concurrent (Promise.all) utf-8/base64 file reading.
@@ -104,7 +104,7 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
                 <strong className="text-zinc-200 font-mono">H2_SAVE_FILE_REQ / H2_DELETE_FILE_REQ</strong>: Readwrite cloud saves, nested file creation, and deletion.
               </li>
               <li>
-                <strong className="text-zinc-200 font-mono">H2_DISCONNECT_REQ / H2_DISCONNECT_RES</strong>: Clean session termination.
+                <strong className="text-zinc-200 font-mono">H2_DISCONNECT_REQ / H2_DISCONNECT_RES</strong>: Clean session termination and sessionStorage cleanup.
               </li>
             </ul>
           </div>

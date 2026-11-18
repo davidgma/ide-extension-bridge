@@ -231,7 +231,7 @@ export function buildFileTree(files: CloudFile[]): FileTreeNode[] {
   return finalizeNodes(rootMap);
 }
 
-// Default standalone workspace shown when opened without an h2Session launch parameter
+// Default standalone workspace shown when opened without an active extension connection
 export const INITIAL_CLOUD_FILES: CloudFile[] = [
   {
     id: 'file-readme',
@@ -240,20 +240,20 @@ export const INITIAL_CLOUD_FILES: CloudFile[] = [
     cloudProvider: 'Standalone',
     mimeType: 'text/markdown',
     contentLoaded: true,
-    lastModified: '2026-11-18 07:20',
+    lastModified: '2026-11-18 08:00',
     content: `# FreshFood Rocks - Monarch IDE & Cloud Studio
 
 Welcome to **Monarch IDE & Cloud Studio**, deployed at [ide.freshfood.rocks](https://ide.freshfood.rocks).
 
-This single-page cloud engineering environment connects to Chrome extensions implementing the **Clockie H2 Bridge Protocol v1.2 (\`H2_CLOUD_BRIDGE\`)**, supporting both launched workspaces and direct multi-drive sessions.
+This single-page cloud engineering environment connects to Chrome extensions implementing the **Clockie H2 Bridge Protocol v1.3 (\`H2_CLOUD_BRIDGE\`)**, using clean URLs with per-tab \`sessionStorage\` session binding.
 
 ---
 
 ### Key Capabilities
 - **Monaco & Monarch Engine**: Rich syntax highlighting, custom token lexers, multi-theme engine, and minimap.
-- **H2 Bridge Protocol v1.2 (\`H2_CLOUD_BRIDGE\`)**:
-  - **Launched Mode** (\`#h2Session=<sessionId>\`): Automatic \`H2_HANDSHAKE_REQ\` and \`H2_WORKSPACE_TREE\`.
-  - **Direct Mode**: Origin-verified \`H2_CONNECT_REQ\` with multi-drive access (\`pcloud\`, \`gdrive\`, \`dropbox\`, \`local\`) and \`accessMode\` (\`readwrite\` / \`readonly\`).
+- **H2 Bridge Protocol v1.3 (\`H2_CLOUD_BRIDGE\`)**:
+  - **Unified Connection (\`H2_CONNECT_REQ\`)**: Clean URLs with no hash/query session parameters; extension resolves tab-bound \`launched\` launches or mints \`direct\` sessions automatically.
+  - **Drive Root & Multi-Drive Switching**: Switch between connected drives (\`pcloud\`, \`gdrive\`, \`dropbox\`, \`local\`, \`all\`) or step out to \`driveRoot: true\` at any time.
   - **Lazy Depth & Concurrent Reads**: Incremental folder expansion (\`H2_LIST_FOLDER_REQ\`) and parallel file streaming (\`H2_READ_FILE_REQ\`).
 - **Multi-File Workspace**: Interactive tree hierarchy including empty folders, nested file creation, workspace search, and live Markdown/media viewing.
 - **Automated CI/CD**: GitHub Actions workflow (\`.github/workflows/deploy.yml\`) deploying to \`ide.freshfood.rocks\`.
@@ -276,7 +276,7 @@ This single-page cloud engineering environment connects to Chrome extensions imp
     cloudProvider: 'Standalone',
     mimeType: 'text/typescript',
     contentLoaded: true,
-    lastModified: '2026-11-18 07:15',
+    lastModified: '2026-11-18 08:00',
     content: `/**
  * FreshFood Rocks - Monarch Cloud Stream Engine
  * Handles real-time telemetry, cache validation, and data pipelines.
@@ -326,7 +326,7 @@ export class FreshFoodCloudEngine {
     cloudProvider: 'Standalone',
     mimeType: 'application/json',
     contentLoaded: true,
-    lastModified: '2026-11-18 07:10',
+    lastModified: '2026-11-18 08:00',
     content: `{
   "workspace": "FreshFood Rocks Studio",
   "domain": "ide.freshfood.rocks",
@@ -340,8 +340,8 @@ export class FreshFoodCloudEngine {
   },
   "extensionBridge": {
     "protocol": "H2_CLOUD_BRIDGE",
-    "protocolVersion": "1.2",
-    "supportedVersions": ["1.2", "1.1"]
+    "protocolVersion": "1.3",
+    "supportedVersions": ["1.3"]
   }
 }
 `

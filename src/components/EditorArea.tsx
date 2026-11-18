@@ -1,6 +1,6 @@
 /**
  * Monaco Editor & Media/Markdown Workspace Area.
- * Supports lazy file loading states for H2_CLOUD_BRIDGE v1.2 (H2_READ_FILE_REQ)
+ * Supports lazy file loading states for H2_CLOUD_BRIDGE v1.3 (H2_READ_FILE_REQ)
  * and read-only session enforcement (accessMode === "readonly").
  *
  * Official Documentation:
@@ -129,7 +129,7 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
               Target Host: <span className="text-emerald-300">https://ide.freshfood.rocks</span>
             </p>
             <p className="text-xs text-zinc-400 mt-1">
-              H2 Cloud Bridge Protocol v1.2 (H2_CLOUD_BRIDGE)
+              H2 Cloud Bridge Protocol v1.3 (H2_CLOUD_BRIDGE)
             </p>
           </div>
 
@@ -153,7 +153,7 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
                 <Radio className="w-4 h-4 text-blue-400" />
                 <span>Bridge Protocol</span>
               </div>
-              <div className="text-[11px] text-zinc-500 mt-1 font-mono font-normal">Inspect v1.2</div>
+              <div className="text-[11px] text-zinc-500 mt-1 font-mono font-normal">Inspect v1.3</div>
             </button>
           </div>
 

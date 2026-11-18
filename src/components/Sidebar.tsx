@@ -1,9 +1,9 @@
 /**
- * Workspace File Explorer Sidebar.
+ * Workspace File Explorer Sidebar (H2_CLOUD_BRIDGE v1.3).
  * Displays folders (including empty & lazily-loaded subdirectories where childrenLoaded === false)
  * and files from H2_WORKSPACE_TREE / H2_LIST_FOLDER_RES.
  * Supports nested file creation (H2_SAVE_FILE_REQ), file/folder deletion (H2_DELETE_FILE_REQ),
- * multi-drive switching (H2_WORKSPACE_TREE_REQ), and read-only capability enforcement.
+ * multi-drive & driveRoot switching (H2_WORKSPACE_TREE_REQ), and read-only capability enforcement.
  *
  * Official Documentation:
  * - Lucide React Icons: https://lucide.dev/guide/packages/lucide-react
@@ -36,7 +36,7 @@ import {
   EyeOff,
   Lock,
 } from 'lucide-react';
-import { CloudFile, FileTreeNode, CloudProvider, H2DriveStatus } from '../types/ide';
+import { CloudFile, FileTreeNode, CloudProvider, H2DriveStatus, H2LaunchedScope } from '../types/ide';
 import { getFileExtension, isImageFile, isVideoFile, buildFileTree } from '../utils/fileSystem';
 
 interface SidebarProps {
@@ -52,7 +52,10 @@ interface SidebarProps {
   canDeleteFolders: boolean;
   drives?: Record<string, H2DriveStatus>;
   selectedDrive?: CloudProvider;
+  launchedScope?: H2LaunchedScope | null;
+  driveRootActive?: boolean;
   onSelectDrive?: (drive: CloudProvider) => void;
+  onReturnToLaunchedScope?: () => void;
   onRefreshTree?: () => void;
   onExpandFolder: (folder: CloudFile) => void;
   onSelectFile: (fileId: string) => void;
@@ -78,7 +81,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   canDeleteFolders,
   drives,
   selectedDrive,
+  launchedScope,
+  driveRootActive,
   onSelectDrive,
+  onReturnToLaunchedScope,
   onRefreshTree,
   onExpandFolder,
   onSelectFile,
@@ -429,42 +435,54 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         )}
 
-        {/* Connected Multi-Drive Switcher (v1.2 Direct Mode / multiDrive) */}
+        {/* Connected Multi-Drive Switcher (v1.3 Direct & Launched driveRoot switching) */}
         {isConnected && connectedDrives.length > 0 && onSelectDrive && (
-          <div className="flex flex-wrap items-center gap-1 pt-1 border-t border-zinc-800/60">
-            <button
-              onClick={() => onSelectDrive('all')}
-              className={`px-1.5 py-0.5 rounded text-[10px] font-mono border transition ${
-                (selectedDrive || cloudProvider) === 'all'
-                  ? 'bg-blue-600 text-white border-blue-500 font-semibold'
-                  : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-white'
-              }`}
-              title="Query all connected drives (H2_WORKSPACE_TREE_REQ)"
-            >
-              all
-            </button>
-            {connectedDrives.map(([driveKey, status]) => {
-              const isSelected = (selectedDrive || cloudProvider) === driveKey;
-              return (
-                <button
-                  key={driveKey}
-                  onClick={() => onSelectDrive(driveKey)}
-                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono border transition ${
-                    isSelected
-                      ? 'bg-emerald-600 text-white border-emerald-500 font-semibold'
-                      : 'bg-zinc-900 text-zinc-300 border-zinc-800 hover:border-emerald-500/40'
-                  }`}
-                  title={
-                    status.visible
-                      ? `Browse ${driveKey}`
-                      : `Browse ${driveKey} (authenticated, hidden in extension sidebar)`
-                  }
-                >
-                  <span>{driveKey}</span>
-                  {!status.visible && <EyeOff className="w-2.5 h-2.5 text-blue-300" />}
-                </button>
-              );
-            })}
+          <div className="space-y-1.5 pt-1 border-t border-zinc-800/60">
+            <div className="flex flex-wrap items-center gap-1">
+              <button
+                onClick={() => onSelectDrive('all')}
+                className={`px-1.5 py-0.5 rounded text-[10px] font-mono border transition ${
+                  (selectedDrive || cloudProvider) === 'all'
+                    ? 'bg-blue-600 text-white border-blue-500 font-semibold'
+                    : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-white'
+                }`}
+                title="Query all connected drives (H2_WORKSPACE_TREE_REQ driveRoot: true)"
+              >
+                all
+              </button>
+              {connectedDrives.map(([driveKey, status]) => {
+                const isSelected = (selectedDrive || cloudProvider) === driveKey;
+                return (
+                  <button
+                    key={driveKey}
+                    onClick={() => onSelectDrive(driveKey)}
+                    className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono border transition ${
+                      isSelected
+                        ? 'bg-emerald-600 text-white border-emerald-500 font-semibold'
+                        : 'bg-zinc-900 text-zinc-300 border-zinc-800 hover:border-emerald-500/40'
+                    }`}
+                    title={
+                      status.visible
+                        ? `Browse ${driveKey} drive root`
+                        : `Browse ${driveKey} drive root (authenticated, hidden in extension sidebar)`
+                    }
+                  >
+                    <span>{driveKey}</span>
+                    {!status.visible && <EyeOff className="w-2.5 h-2.5 text-blue-300" />}
+                  </button>
+                );
+              })}
+            </div>
+
+            {launchedScope && driveRootActive && onReturnToLaunchedScope && (
+              <button
+                onClick={onReturnToLaunchedScope}
+                className="w-full px-2 py-0.5 rounded bg-blue-950/60 hover:bg-blue-900/70 text-blue-300 border border-blue-500/30 text-[10px] font-mono transition text-left truncate"
+                title={`Return to launched scope: ${launchedScope.rootName}`}
+              >
+                Return to launched: {launchedScope.rootName}
+              </button>
+            )}
           </div>
         )}
 

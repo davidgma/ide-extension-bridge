@@ -1,6 +1,6 @@
 /**
  * Bottom IDE Status Bar.
- * Displays H2_CLOUD_BRIDGE v1.2 connection state, session mode (launched/direct),
+ * Displays H2_CLOUD_BRIDGE v1.3 connection state, session mode (launched/direct),
  * accessMode badge (readwrite/readonly), debugger/terminal toggles, toast notifications,
  * cursor position, and active language badge.
  *
@@ -66,7 +66,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
             <div className="flex items-center gap-1.5 text-emerald-400">
               <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
               <span>
-                H2 v1.2 {handshakeInfo?.sessionMode || 'connected'}
+                H2 v1.3 {handshakeInfo?.sessionMode || 'connected'}
                 {handshakeInfo?.provider ? ` (${handshakeInfo.provider})` : ''}
               </span>
               {isReadOnly && (
@@ -86,7 +86,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
           ) : extensionStatus === 'connecting' ? (
             <div className="flex items-center gap-1.5 text-blue-400">
               <span className="w-2 h-2 rounded-full bg-blue-400 inline-block animate-pulse" />
-              <span>Connecting H2 v1.2...</span>
+              <span>Connecting H2 v1.3...</span>
               <button
                 onClick={onStopBridge}
                 className="hover:text-white text-[10px] underline ml-0.5 cursor-pointer"
@@ -99,7 +99,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
             <button
               onClick={onStartBridge}
               className="flex items-center gap-1 text-zinc-400 hover:text-emerald-300 transition cursor-pointer"
-              title="Connect H2_CLOUD_BRIDGE v1.2"
+              title="Connect H2_CLOUD_BRIDGE v1.3"
             >
               <Plug className="w-3 h-3 text-zinc-400" />
               <span>H2 Bridge: Disconnected</span>
@@ -109,9 +109,9 @@ export const StatusBar: React.FC<StatusBarProps> = ({
           <button
             onClick={onOpenBridgeModal}
             className="text-zinc-500 hover:text-blue-300 text-[10px] ml-1"
-            title="Inspect H2_CLOUD_BRIDGE v1.2 Protocol & Session"
+            title="Inspect H2_CLOUD_BRIDGE v1.3 Protocol & Session"
           >
-            [Protocol v1.2]
+            [Protocol v1.3]
           </button>
         </div>
 

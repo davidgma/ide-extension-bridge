@@ -1,9 +1,11 @@
 /**
- * Core TypeScript definitions for Monarch IDE & Clockie H2 Bridge Protocol v1.2 (H2_CLOUD_BRIDGE).
+ * Core TypeScript definitions for Monarch IDE & Clockie H2 Bridge Protocol v1.3 (H2_CLOUD_BRIDGE).
+ * Zero-URL session binding via per-tab sessionStorage and unified H2_CONNECT_REQ/RES startup.
  *
  * Official Documentation:
  * - TypeScript Handbook: https://www.typescriptlang.org/docs/
  * - Window.postMessage API: https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage
+ * - Window.sessionStorage: https://developer.mozilla.org/en-US/docs/Web/API/Window/sessionStorage
  */
 
 export type CloudProvider = string;
@@ -19,10 +21,22 @@ export interface H2DriveStatus {
   visible: boolean;
 }
 
+export interface H2LaunchedScope {
+  provider: CloudProvider;
+  rootName: string;
+  rootFolderId?: string;
+  rootPath?: string;
+  launchedItemType: 'file' | 'folder' | 'workspace';
+  primaryRelativePath?: string;
+}
+
 export interface H2Capabilities {
-  multiDrive?: boolean;
   lazyTree?: boolean;
   lazyRead?: boolean;
+  listFolder?: boolean;
+  workspaceTreeDepth?: boolean;
+  multiDrive?: boolean;
+  driveRootSwitch?: boolean;
   save?: boolean;
   createFiles?: boolean;
   createFolders?: boolean;
@@ -55,10 +69,12 @@ export interface CloudFile {
   /** Error message if lazy content loading failed */
   loadError?: string;
   isDirectory?: boolean;
-  /** For directories in v1.2 depth-limited trees: false means deeper children have not been fetched yet */
+  /** For directories in depth-limited trees: false means deeper children have not been fetched yet */
   childrenLoaded?: boolean;
   /** True while an H2_LIST_FOLDER_REQ for this folder is in flight */
   isLoadingChildren?: boolean;
+  /** Whether this item belongs to a full driveRoot browse (outside launchedScope) */
+  driveRoot?: boolean;
   cloudProvider: CloudProvider;
   mimeType?: string;
   contentType?: 'text' | 'binary';
@@ -97,8 +113,10 @@ export interface ExtensionHandshakeInfo {
   provider: CloudProvider;
   rootName?: string;
   rootFolderId?: string;
-  launchedItemType?: 'folder' | 'file';
+  launchedItemType?: 'folder' | 'file' | 'workspace';
   primaryRelativePath?: string;
+  launchedScope?: H2LaunchedScope | null;
+  driveRootActive?: boolean;
   drives?: Record<string, H2DriveStatus>;
   capabilities?: H2Capabilities;
   stats?: {
@@ -121,15 +139,13 @@ export interface DispatchTargetInfo {
 }
 
 export type H2MessageType =
+  | 'H2_BRIDGE_READY'
   | 'H2_CONNECT_REQ'
   | 'H2_CONNECT_RES'
-  | 'H2_HANDSHAKE_REQ'
-  | 'H2_HANDSHAKE_RES'
   | 'H2_WORKSPACE_TREE_REQ'
   | 'H2_WORKSPACE_TREE'
   | 'H2_LIST_FOLDER_REQ'
   | 'H2_LIST_FOLDER_RES'
-  | 'H2_WORKSPACE_TREE_ACK'
   | 'H2_READ_FILE_REQ'
   | 'H2_READ_FILE_RES'
   | 'H2_SAVE_FILE_REQ'
@@ -149,7 +165,7 @@ export interface BridgeMessage {
   channel?: 'postMessage' | 'system';
   payload: any;
   response?: any;
-  status?: 'sent' | 'received' | 'acknowledged' | 'error' | 'timeout';
+  status?: 'sent' | 'received' | 'error' | 'timeout';
   roundtripMs?: number;
   timestamp: number;
   formattedTime: string;

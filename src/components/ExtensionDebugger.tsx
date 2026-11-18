@@ -1,11 +1,12 @@
 /**
- * Extension Bridge Debugger Drawer for Clockie H2 Bridge Protocol v1.2 (H2_CLOUD_BRIDGE).
- * Displays live outgoing/incoming message packets, requestId correlation, sessionId,
- * sessionMode (launched/direct), accessMode (readwrite/readonly), connected drives,
+ * Extension Bridge Debugger Drawer for Clockie H2 Bridge Protocol v1.3 (H2_CLOUD_BRIDGE).
+ * Displays live outgoing/incoming message packets, requestId correlation, per-tab sessionStorage ID,
+ * sessionMode (launched/direct), launchedScope, driveRoot, accessMode, connected drives,
  * negotiated capabilities, and window.postMessage target diagnostics.
  *
  * Official Documentation:
  * - Window.postMessage: https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage
+ * - Window.sessionStorage: https://developer.mozilla.org/en-US/docs/Web/API/Window/sessionStorage
  */
 
 import React, { useState } from 'react';
@@ -20,11 +21,11 @@ import {
   ChevronDown,
   Info,
   Bug,
-  RotateCw,
   Globe,
   Plug,
 } from 'lucide-react';
 import { BridgeMessage, ExtensionStatus, ExtensionHandshakeInfo } from '../types/ide';
+import { H2_SESSION_STORAGE_KEY } from '../utils/h2BridgeClient';
 
 interface ExtensionDebuggerProps {
   isOpen: boolean;
@@ -36,8 +37,7 @@ interface ExtensionDebuggerProps {
   connectionReasonCode: string | null;
   onClose: () => void;
   onClearLogs: () => void;
-  onConnectWithSession: (explicitSessionId?: string) => void;
-  onConnectDirect: () => void;
+  onConnectBridge: () => void;
 }
 
 export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
@@ -50,15 +50,13 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
   connectionReasonCode,
   onClose,
   onClearLogs,
-  onConnectWithSession,
-  onConnectDirect,
+  onConnectBridge,
 }) => {
   const [filter, setFilter] = useState<'all' | 'outgoing' | 'incoming' | 'fileOps' | 'errors'>('all');
   const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [isLogCopied, setIsLogCopied] = useState(false);
   const [showTargetDetails, setShowTargetDetails] = useState(true);
-  const [manualSid, setManualSid] = useState('');
   const [height, setHeight] = useState(340);
 
   if (!isOpen) return null;
@@ -106,7 +104,8 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
     const debugReport = {
       timestamp: new Date().toISOString(),
       protocol: 'H2_CLOUD_BRIDGE',
-      protocolVersion: '1.2',
+      protocolVersion: '1.3',
+      storageKey: H2_SESSION_STORAGE_KEY,
       sessionId,
       extensionStatus,
       connectionError,
@@ -171,7 +170,7 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
             <Bug className="w-3.5 h-3.5" />
           </div>
           <span className="font-bold text-white text-xs tracking-tight">
-            Extension Bridge Debugger (v1.2)
+            Extension Bridge Debugger (v1.3)
           </span>
 
           <div
@@ -265,21 +264,12 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
         {/* Action Controls */}
         <div className="flex items-center gap-1.5">
           <button
-            onClick={onConnectDirect}
+            onClick={onConnectBridge}
             className="flex items-center gap-1 px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white text-[10.5px] transition"
-            title="Send H2_CONNECT_REQ (Direct Mode v1.2)"
+            title="Send H2_CONNECT_REQ (Protocol v1.3)"
           >
             <Plug className="w-3 h-3" />
-            <span>Direct Connect</span>
-          </button>
-
-          <button
-            onClick={() => onConnectWithSession(manualSid || undefined)}
-            className="flex items-center gap-1 px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 text-[10.5px] transition"
-            title="Send H2_HANDSHAKE_REQ / Auto-connect"
-          >
-            <RotateCw className="w-3 h-3 text-emerald-400" />
-            <span>Handshake</span>
+            <span>Connect (H2_CONNECT_REQ)</span>
           </button>
 
           <button
@@ -322,11 +312,9 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
       {showTargetDetails && (
         <div className="bg-[#161619] border-b border-zinc-800 p-2.5 px-3 text-[11px] space-y-1.5 shrink-0">
           {connectionError && (
-            <div className="p-2 rounded bg-red-950/50 border border-red-500/40 text-red-200 text-[10.5px] flex items-center justify-between">
-              <span>
-                {connectionReasonCode ? `[${connectionReasonCode}] ` : ''}
-                {connectionError}
-              </span>
+            <div className="p-2 rounded bg-red-950/50 border border-red-500/40 text-red-200 text-[10.5px]">
+              {connectionReasonCode ? `[${connectionReasonCode}] ` : ''}
+              {connectionError}
             </div>
           )}
 
@@ -334,12 +322,14 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
             <div className="p-1.5 rounded bg-zinc-900 border border-zinc-800">
               <div className="text-zinc-500 text-[9.5px]">Protocol & Mode:</div>
               <div className="text-emerald-300 font-semibold">
-                H2_CLOUD_BRIDGE v1.2 ({handshakeInfo?.sessionMode || (sessionId ? 'launched' : 'direct')})
+                H2_CLOUD_BRIDGE v1.3 ({handshakeInfo?.sessionMode || 'unconnected'})
               </div>
             </div>
 
             <div className="p-1.5 rounded bg-zinc-900 border border-zinc-800">
-              <div className="text-zinc-500 text-[9.5px]">Active Session ID:</div>
+              <div className="text-zinc-500 text-[9.5px]">
+                sessionStorage ({H2_SESSION_STORAGE_KEY}):
+              </div>
               <div className="text-white truncate font-semibold" title={sessionId || 'None active'}>
                 {sessionId || 'No active session'}
               </div>
@@ -352,21 +342,13 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
               </div>
             </div>
 
-            <div className="p-1.5 rounded bg-zinc-900 border border-zinc-800 flex items-center gap-1.5">
-              <input
-                type="text"
-                placeholder="Attach h2Session ID..."
-                value={manualSid}
-                onChange={e => setManualSid(e.target.value)}
-                className="flex-1 min-w-0 bg-zinc-950 border border-zinc-700 rounded px-2 py-0.5 text-[10.5px] text-white outline-none focus:border-emerald-500"
-              />
-              <button
-                onClick={() => onConnectWithSession(manualSid)}
-                disabled={!manualSid.trim()}
-                className="px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-semibold disabled:opacity-40 shrink-0"
-              >
-                Attach
-              </button>
+            <div className="p-1.5 rounded bg-zinc-900 border border-zinc-800">
+              <div className="text-zinc-500 text-[9.5px]">Scope & Drive Root:</div>
+              <div className="text-emerald-300 truncate font-semibold">
+                {handshakeInfo?.launchedScope
+                  ? `${handshakeInfo.launchedScope.provider}:${handshakeInfo.launchedScope.rootName} (driveRoot: ${handshakeInfo.driveRootActive ? 'true' : 'false'})`
+                  : `provider: ${handshakeInfo?.provider || 'none'}`}
+              </div>
             </div>
           </div>
 
@@ -416,7 +398,7 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
           <div className="p-8 text-center text-zinc-500 text-xs italic space-y-2">
             <div>No H2_CLOUD_BRIDGE communication logged yet.</div>
             <div className="text-[11px] text-zinc-600 font-mono">
-              Click Direct Connect (H2_CONNECT_REQ) or launch with #h2Session=&lt;sessionId&gt;.
+              Click Connect (H2_CONNECT_REQ) to start a v1.3 session over window.postMessage.
             </div>
           </div>
         ) : (
@@ -507,7 +489,7 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
 
                     <span
                       className={`px-1.5 py-0.2 rounded text-[9.5px] font-bold ${
-                        msg.status === 'acknowledged' || msg.status === 'received'
+                        msg.status === 'received'
                           ? 'bg-emerald-950 text-emerald-400 border border-emerald-500/30'
                           : msg.status === 'error' || msg.status === 'timeout'
                           ? 'bg-red-950 text-red-400 border border-red-500/30'

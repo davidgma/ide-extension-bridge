@@ -1,13 +1,13 @@
 /**
- * Extension Bridge Inspector & Protocol v1.2 (H2_CLOUD_BRIDGE) Reference Modal.
- * Supports both Direct Mode (H2_CONNECT_REQ) and Launched Mode (#h2Session),
- * displays connected drives (including hidden sidebar drives), accessMode (readwrite/readonly),
- * negotiated capabilities, and origin authorization errors gracefully.
+ * Extension Bridge Inspector & Protocol v1.3 (H2_CLOUD_BRIDGE) Reference Modal.
+ * Zero-URL session binding via per-tab sessionStorage and unified H2_CONNECT_REQ/RES,
+ * showing launchedScope, drives (including hidden sidebar drives), accessMode,
+ * all v1.3 capabilities, and refusal reasonCodes gracefully.
  *
  * Official Documentation:
  * - React: https://react.dev/reference/react
  * - Window.postMessage: https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage
- * - Lucide React Icons: https://lucide.dev/guide/packages/lucide-react
+ * - Window.sessionStorage: https://developer.mozilla.org/en-US/docs/Web/API/Window/sessionStorage
  */
 
 import React, { useState } from 'react';
@@ -16,7 +16,6 @@ import {
   Radio,
   Trash2,
   Terminal,
-  RotateCw,
   ShieldCheck,
   FileCode,
   Plug,
@@ -25,6 +24,7 @@ import {
   Lock,
 } from 'lucide-react';
 import { ExtensionStatus, ExtensionHandshakeInfo } from '../types/ide';
+import { H2_SESSION_STORAGE_KEY } from '../utils/h2BridgeClient';
 
 interface ExtensionBridgeModalProps {
   isOpen: boolean;
@@ -35,8 +35,7 @@ interface ExtensionBridgeModalProps {
   connectionError: string | null;
   connectionReasonCode: string | null;
   messagesLog: any[];
-  onStartBridge: (explicitSessionId?: string) => void;
-  onConnectDirect: () => void;
+  onConnectBridge: () => void;
   onStopBridge: () => void;
   onClearLogs: () => void;
 }
@@ -50,20 +49,21 @@ export const ExtensionBridgeModal: React.FC<ExtensionBridgeModalProps> = ({
   connectionError,
   connectionReasonCode,
   messagesLog,
-  onStartBridge,
-  onConnectDirect,
+  onConnectBridge,
   onStopBridge,
   onClearLogs,
 }) => {
   const [activeTab, setActiveTab] = useState<'status' | 'protocol'>('status');
-  const [manualSid, setManualSid] = useState('');
 
   if (!isOpen) return null;
 
   const capabilityEntries: Array<{ key: keyof NonNullable<ExtensionHandshakeInfo['capabilities']>; label: string }> = [
-    { key: 'multiDrive', label: 'Multi-Drive' },
     { key: 'lazyTree', label: 'Lazy Tree' },
     { key: 'lazyRead', label: 'Lazy Read' },
+    { key: 'listFolder', label: 'List Folder' },
+    { key: 'workspaceTreeDepth', label: 'Tree Depth' },
+    { key: 'multiDrive', label: 'Multi-Drive' },
+    { key: 'driveRootSwitch', label: 'Drive Root Switch' },
     { key: 'save', label: 'Save Files' },
     { key: 'createFiles', label: 'Create Files' },
     { key: 'createFolders', label: 'Create Folders' },
@@ -73,22 +73,15 @@ export const ExtensionBridgeModal: React.FC<ExtensionBridgeModalProps> = ({
   ];
 
   const protocolMessages = [
-    { type: 'Type 0a/0b: H2_CONNECT_REQ / H2_CONNECT_RES', direction: 'Direct Mode', desc: 'Connects directly from an authorised origin without #h2Session, returning sessionId, accessMode, drives, and capabilities.' },
-    { type: 'Type 1a/1b: H2_HANDSHAKE_REQ / H2_HANDSHAKE_RES', direction: 'Launched Mode', desc: 'Pairs with an existing #h2Session=<sessionId> launched from File Manager.' },
-    { type: 'Type 2a/2: H2_WORKSPACE_TREE_REQ / H2_WORKSPACE_TREE', direction: 'Bidirectional', desc: 'Requests or pushes metadata-only folder trees with optional provider ("all" or drive) and maxDepth.' },
-    { type: 'Type 2b/2c: H2_LIST_FOLDER_REQ / H2_LIST_FOLDER_RES', direction: 'Bidirectional', desc: 'Lazily loads deeper folder levels when expanding nodes with childrenLoaded: false.' },
-    { type: 'Type 3: H2_WORKSPACE_TREE_ACK', direction: 'Web App -> Extension', desc: 'Acknowledges receipt of H2_WORKSPACE_TREE folder and file counts.' },
-    { type: 'Type 4/5: H2_READ_FILE_REQ / H2_READ_FILE_RES', direction: 'Concurrent Safe', desc: 'Lazily reads utf-8 or base64 file content (supports concurrent Promise.all requests).' },
-    { type: 'Type 6/7: H2_SAVE_FILE_REQ / H2_SAVE_FILE_RES', direction: 'Readwrite Only', desc: 'Saves edits or creates files/subdirectories via relativePath and provider.' },
-    { type: 'Type 8/9: H2_DELETE_FILE_REQ / H2_DELETE_FILE_RES', direction: 'Readwrite Only', desc: 'Deletes or trashes individual files or folders.' },
-    { type: 'Type 10a/10b: H2_DISCONNECT_REQ / H2_DISCONNECT_RES', direction: 'Bidirectional', desc: 'Closes the active extension bridge session cleanly.' },
+    { type: 'Type 0: H2_BRIDGE_READY', direction: 'Extension -> Web App', desc: 'Emitted at document_start & DOMContentLoaded when bridge listeners are ready.' },
+    { type: 'Type 1a/1b: H2_CONNECT_REQ / H2_CONNECT_RES', direction: 'Unified Startup', desc: 'Connects with previousSessionId from sessionStorage; returns sessionMode ("launched" | "direct"), launchedScope, accessMode, and drives.' },
+    { type: 'Type 2a: H2_WORKSPACE_TREE_REQ / H2_WORKSPACE_TREE', direction: 'Bidirectional', desc: 'Requests depth-limited metadata trees with optional provider and driveRoot: true/false.' },
+    { type: 'Type 2b/2c: H2_LIST_FOLDER_REQ / H2_LIST_FOLDER_RES', direction: 'Bidirectional', desc: 'Lazily expands folders with childrenLoaded: false (supports driveRoot switching).' },
+    { type: 'Type 3/4: H2_READ_FILE_REQ / H2_READ_FILE_RES', direction: 'Concurrent Safe', desc: 'Lazily reads utf-8 or base64 file content (supports concurrent Promise.all calls).' },
+    { type: 'Type 5/6: H2_SAVE_FILE_REQ / H2_SAVE_FILE_RES', direction: 'Readwrite Only', desc: 'Saves edits or creates files/subdirectories via relativePath, provider, and driveRoot.' },
+    { type: 'Type 7/8: H2_DELETE_FILE_REQ / H2_DELETE_FILE_RES', direction: 'Readwrite Only', desc: 'Deletes or trashes individual files or folders.' },
+    { type: 'Type 9a/9b: H2_DISCONNECT_REQ / H2_DISCONNECT_RES', direction: 'Bidirectional', desc: 'Tears down active session cleanly and clears sessionStorage.' },
   ];
-
-  const handleReconnect = (e: React.FormEvent) => {
-    e.preventDefault();
-    const sid = manualSid.trim() || undefined;
-    onStartBridge(sid);
-  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
@@ -103,11 +96,11 @@ export const ExtensionBridgeModal: React.FC<ExtensionBridgeModalProps> = ({
               <h2 className="text-base font-bold text-white flex items-center gap-2">
                 <span>Extension Bridge Inspector</span>
                 <span className="text-xs px-2 py-0.5 rounded-full font-mono bg-blue-950/70 border border-blue-500/40 text-blue-300 font-normal">
-                  H2_CLOUD_BRIDGE v1.2
+                  H2_CLOUD_BRIDGE v1.3
                 </span>
               </h2>
               <p className="text-xs text-zinc-400">
-                Supports Launched Mode (#h2Session) and Direct Mode (authorised origins) over window.postMessage.
+                Zero-URL per-tab sessionStorage binding with unified H2_CONNECT_REQ startup over window.postMessage.
               </p>
             </div>
           </div>
@@ -143,7 +136,7 @@ export const ExtensionBridgeModal: React.FC<ExtensionBridgeModalProps> = ({
               />
               <span>
                 {extensionStatus === 'connected'
-                  ? `Connected (${handshakeInfo?.sessionMode || 'launched'})`
+                  ? `Connected (${handshakeInfo?.sessionMode || 'direct'})`
                   : extensionStatus === 'connecting'
                   ? 'Connecting...'
                   : 'Disconnected'}
@@ -182,21 +175,12 @@ export const ExtensionBridgeModal: React.FC<ExtensionBridgeModalProps> = ({
             )}
 
             <button
-              onClick={onConnectDirect}
+              onClick={onConnectBridge}
               className="px-2.5 py-1 text-xs rounded bg-emerald-600 hover:bg-emerald-500 text-white font-medium transition flex items-center gap-1"
-              title="Send H2_CONNECT_REQ (Direct Mode v1.2)"
+              title="Send H2_CONNECT_REQ (Protocol v1.3)"
             >
               <Plug className="w-3 h-3" />
-              <span>Direct Connect</span>
-            </button>
-
-            <button
-              onClick={() => onStartBridge(manualSid.trim() || undefined)}
-              className="px-2.5 py-1 text-xs rounded bg-blue-600 hover:bg-blue-500 text-white font-medium transition flex items-center gap-1"
-              title="Auto-connect or Handshake"
-            >
-              <RotateCw className="w-3 h-3" />
-              <span>Handshake</span>
+              <span>Connect (H2_CONNECT_REQ)</span>
             </button>
           </div>
         </div>
@@ -221,7 +205,7 @@ export const ExtensionBridgeModal: React.FC<ExtensionBridgeModalProps> = ({
                 : 'border-transparent text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            Protocol v1.2 Specification
+            Protocol v1.3 Specification
           </button>
         </div>
 
@@ -229,7 +213,7 @@ export const ExtensionBridgeModal: React.FC<ExtensionBridgeModalProps> = ({
         <div className="flex-1 overflow-y-auto p-6 bg-[#0f0f11]">
           {activeTab === 'status' && (
             <div className="space-y-5">
-              {/* Connection refusal / origin authorization notice */}
+              {/* Connection refusal / authorization notice */}
               {connectionError && (
                 <div className="p-4 rounded-xl border border-red-500/40 bg-red-950/30 flex items-start gap-3 text-xs text-red-200">
                   <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
@@ -244,35 +228,31 @@ export const ExtensionBridgeModal: React.FC<ExtensionBridgeModalProps> = ({
                         Authorize <code className="font-mono text-blue-300">{window.location.origin}</code> in the extension settings or launch directly from the File Manager.
                       </p>
                     )}
+                    {connectionReasonCode === 'UNSUPPORTED_VERSION' && (
+                      <p className="text-zinc-300 text-[11px]">
+                        This web app requires H2_CLOUD_BRIDGE v1.3. Update your Clockie H2 extension to v1.3+.
+                      </p>
+                    )}
                   </div>
                 </div>
               )}
 
-              {/* Attach Session ID Form */}
-              <form
-                onSubmit={handleReconnect}
-                className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/60 flex flex-wrap items-center gap-3"
-              >
-                <div className="flex items-center gap-2 text-xs text-zinc-300 font-medium">
-                  <Plug className="w-4 h-4 text-blue-400" />
-                  <span>Launched Session ID:</span>
+              {/* Zero-URL Session Binding Summary */}
+              <div className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/60 flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div>
+                  <div className="font-semibold text-zinc-200">Zero-URL Session Storage</div>
+                  <div className="text-zinc-400 font-mono text-[11px] mt-0.5">
+                    sessionStorage["{H2_SESSION_STORAGE_KEY}"] = {sessionId || 'null'}
+                  </div>
                 </div>
-                <input
-                  type="text"
-                  value={manualSid}
-                  onChange={e => setManualSid(e.target.value)}
-                  placeholder={sessionId || 'Optional h2Session ID (leave blank for Direct Connect)'}
-                  className="flex-1 min-w-[200px] px-3 py-1.5 rounded bg-zinc-950 border border-zinc-700 text-xs font-mono text-white focus:outline-none focus:border-blue-500"
-                />
-                <button
-                  type="submit"
-                  className="px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition"
-                >
-                  Connect Session
-                </button>
-              </form>
+                {handshakeInfo?.launchedScope && (
+                  <div className="text-right font-mono text-[11px] text-blue-300">
+                    launchedScope: {handshakeInfo.launchedScope.provider}:{handshakeInfo.launchedScope.rootName} ({handshakeInfo.launchedScope.launchedItemType})
+                  </div>
+                )}
+              </div>
 
-              {/* Drives, Capabilities & Metadata */}
+              {/* Drives & Capabilities */}
               {handshakeInfo && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/50 space-y-2">
@@ -306,7 +286,7 @@ export const ExtensionBridgeModal: React.FC<ExtensionBridgeModalProps> = ({
                     </h4>
                     <div>Root: <span className="text-white">{handshakeInfo.rootName || '-'}</span></div>
                     <div>
-                      Session Mode: <span className="text-blue-300">{handshakeInfo.sessionMode || 'launched'}</span>
+                      Session Mode: <span className="text-blue-300">{handshakeInfo.sessionMode || 'direct'}</span>
                       {' | '}
                       Version: <span className="text-emerald-300">{handshakeInfo.version}</span>
                     </div>
@@ -359,7 +339,7 @@ export const ExtensionBridgeModal: React.FC<ExtensionBridgeModalProps> = ({
                 <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3 max-h-[260px] overflow-y-auto font-mono text-xs space-y-2">
                   {messagesLog.length === 0 ? (
                     <div className="text-zinc-500 text-center py-6 italic text-[11px]">
-                      No bridge messages recorded yet. Click Direct Connect or launch with #h2Session=&lt;id&gt;.
+                      No bridge messages recorded yet. Click Connect (H2_CONNECT_REQ) to test the extension bridge.
                     </div>
                   ) : (
                     messagesLog.map(msg => (
@@ -396,11 +376,11 @@ export const ExtensionBridgeModal: React.FC<ExtensionBridgeModalProps> = ({
           {activeTab === 'protocol' && (
             <div className="space-y-4">
               <div className="p-4 rounded-xl border border-blue-500/30 bg-blue-950/20 text-xs text-zinc-300 space-y-1.5">
-                <div className="font-semibold text-white">Envelope & Connection Rules (v1.2)</div>
+                <div className="font-semibold text-white">Zero-URL Session & Envelope Rules (v1.3)</div>
                 <p>
-                  Launched URL format: <code className="text-emerald-300 font-mono">#h2Session=&lt;sessionId&gt;</code>
-                  {' '}• Direct Mode omits <code className="text-blue-300 font-mono">sessionId</code> on{' '}
-                  <code className="text-blue-300 font-mono">H2_CONNECT_REQ</code>.
+                  URLs stay 100% clean (no <code className="text-red-300 font-mono">#h2Session</code> or{' '}
+                  <code className="text-red-300 font-mono">?h2Session</code>). The active sessionId lives only in{' '}
+                  <code className="text-emerald-300 font-mono">window.sessionStorage["{H2_SESSION_STORAGE_KEY}"]</code>.
                 </p>
                 <p>
                   Replies are accepted only when <code className="text-blue-300 font-mono">event.source === window</code>,{' '}
@@ -430,7 +410,7 @@ export const ExtensionBridgeModal: React.FC<ExtensionBridgeModalProps> = ({
         <div className="px-6 py-3 border-t border-zinc-800 bg-zinc-900/60 flex items-center justify-between text-xs text-zinc-400">
           <div className="flex items-center gap-2 font-mono">
             <span>Protocol:</span>
-            <span className="text-emerald-400 font-semibold">H2_CLOUD_BRIDGE v1.2</span>
+            <span className="text-emerald-400 font-semibold">H2_CLOUD_BRIDGE v1.3</span>
           </div>
           <button
             onClick={onClose}
