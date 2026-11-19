@@ -87,18 +87,18 @@ export const Header: React.FC<HeaderProps> = ({
   const modeLabel = handshakeInfo?.sessionMode || 'direct';
 
   return (
-    <header className="h-12 bg-[#18181b] border-b border-zinc-800 flex items-center justify-between px-3 text-xs select-auto shadow-md z-30">
+    <header className="h-12 bg-white dark:bg-[#18181b] border-b border-slate-200 dark:border-zinc-800 flex items-center justify-between px-3 text-xs select-auto shadow-sm dark:shadow-md z-30">
       {/* Left Brand & Extension Bridge Controls */}
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-2 group cursor-pointer" onClick={onOpenBridgeModal}>
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-emerald-500 to-blue-600 flex items-center justify-center shadow-lg shadow-emerald-900/30">
+          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-emerald-500 to-blue-600 flex items-center justify-center shadow-md shadow-emerald-900/20">
             <Radio className="w-4 h-4 text-white" />
           </div>
           <div>
-            <div className="flex items-center gap-1.5 font-bold tracking-tight text-white text-sm">
+            <div className="flex items-center gap-1.5 font-bold tracking-tight text-slate-900 dark:text-white text-sm">
               <span>FreshFood</span>
-              <span className="text-emerald-400">.rocks</span>
-              <span className="text-[10px] font-mono px-1.5 py-0.5 bg-emerald-950 text-emerald-300 border border-emerald-500/30 rounded font-normal">
+              <span className="text-emerald-600 dark:text-emerald-400">.rocks</span>
+              <span className="text-[10px] font-mono px-1.5 py-0.5 bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30 rounded font-normal">
                 Monarch IDE v1.3
               </span>
             </div>
@@ -110,32 +110,32 @@ export const Header: React.FC<HeaderProps> = ({
           href="https://ide.freshfood.rocks"
           target="_blank"
           rel="noreferrer"
-          className="hidden md:flex items-center gap-1 px-2.5 py-1 rounded-md bg-zinc-900/80 hover:bg-zinc-800 text-zinc-400 hover:text-emerald-300 border border-zinc-800 text-[11px] font-mono transition"
+          className="hidden md:flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-100 dark:bg-zinc-900/80 hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-600 dark:text-zinc-400 hover:text-emerald-700 dark:hover:text-emerald-300 border border-slate-200 dark:border-zinc-800 text-[11px] font-mono transition"
           title="Target Domain: ide.freshfood.rocks"
         >
           <span>ide.freshfood.rocks</span>
           <ExternalLink className="w-3 h-3 opacity-60" />
         </a>
 
-        <div className="h-4 w-px bg-zinc-800 hidden md:block" />
+        <div className="h-4 w-px bg-slate-200 dark:bg-zinc-800 hidden md:block" />
 
         {/* H2 Bridge Connection Controls */}
-        <div className="flex items-center bg-zinc-900 border border-zinc-700/80 rounded-full p-0.5">
+        <div className="flex items-center bg-slate-100 dark:bg-zinc-900 border border-slate-300 dark:border-zinc-700/80 rounded-full p-0.5">
           {extensionStatus === 'connected' ? (
             <div className="flex items-center gap-2 pl-2.5 pr-1 py-0.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-400" />
-              <span className="text-emerald-300 font-medium text-[11px] hidden sm:inline">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 dark:bg-emerald-400" />
+              <span className="text-emerald-700 dark:text-emerald-300 font-medium text-[11px] hidden sm:inline">
                 H2 v1.3 {modeLabel} ({providerLabel})
               </span>
               {isReadOnly && (
-                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-red-950/80 text-red-300 border border-red-700/60 text-[10px]">
+                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-red-100 dark:bg-red-950/80 text-red-700 dark:text-red-300 border border-red-300 dark:border-red-700/60 text-[10px]">
                   <Lock className="w-2.5 h-2.5" />
                   Read-Only
                 </span>
               )}
               <button
                 onClick={onStopBridge}
-                className="px-2 py-0.5 rounded-full bg-red-950/80 hover:bg-red-900 text-red-300 border border-red-800 text-[10px] font-semibold transition"
+                className="px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-950/80 hover:bg-red-200 dark:hover:bg-red-900 text-red-700 dark:text-red-300 border border-red-300 dark:border-red-800 text-[10px] font-semibold transition"
                 title="Send H2_DISCONNECT_REQ and disconnect"
               >
                 Disconnect
@@ -143,13 +143,13 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           ) : extensionStatus === 'connecting' ? (
             <div className="flex items-center gap-2 pl-2.5 pr-1 py-0.5">
-              <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
-              <span className="text-blue-300 font-medium text-[11px]">
+              <span className="w-2 h-2 rounded-full bg-blue-500 dark:bg-blue-400 animate-pulse" />
+              <span className="text-blue-700 dark:text-blue-300 font-medium text-[11px]">
                 Connecting...
               </span>
               <button
                 onClick={onStopBridge}
-                className="px-2 py-0.5 rounded-full bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[10px] transition"
+                className="px-2 py-0.5 rounded-full bg-slate-200 dark:bg-zinc-800 hover:bg-slate-300 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 text-[10px] transition"
                 title="Cancel connecting"
               >
                 Cancel
@@ -158,60 +158,60 @@ export const Header: React.FC<HeaderProps> = ({
           ) : (
             <button
               onClick={onStartBridge}
-              className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white transition"
+              className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium bg-white dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-800 dark:text-zinc-200 hover:text-slate-950 dark:hover:text-white transition shadow-2xs"
               title="Connect to Clockie H2 Extension (H2_CONNECT_REQ v1.3)"
             >
-              <Plug className="w-3.5 h-3.5 text-emerald-400" />
+              <Plug className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
               <span>Connect H2 Bridge</span>
             </button>
           )}
 
           <button
             onClick={onOpenBridgeModal}
-            className="p-1 rounded-full hover:bg-zinc-800 text-zinc-400 hover:text-white transition mr-0.5"
+            className="p-1 rounded-full hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white transition mr-0.5"
             title="Extension Bridge Inspector & Protocol v1.3"
           >
-            <Radio className="w-3 h-3 text-zinc-400" />
+            <Radio className="w-3 h-3" />
           </button>
         </div>
       </div>
 
       {/* Middle Active File Metadata */}
-      <div className="hidden xl:flex items-center gap-3 text-zinc-400 text-xs font-mono">
+      <div className="hidden xl:flex items-center gap-3 text-slate-500 dark:text-zinc-400 text-xs font-mono">
         {activeFile ? (
-          <div className="flex items-center gap-2 px-3 py-1 bg-zinc-900/60 border border-zinc-800 rounded-lg">
-            <span className="text-white font-medium">{activeFile.name}</span>
-            <span className="text-zinc-600">|</span>
-            <span className="text-zinc-400 text-[11px] flex items-center gap-1">
-              <HardDrive className="w-3 h-3 text-emerald-400" />
+          <div className="flex items-center gap-2 px-3 py-1 bg-slate-100 dark:bg-zinc-900/60 border border-slate-200 dark:border-zinc-800 rounded-lg">
+            <span className="text-slate-900 dark:text-white font-medium">{activeFile.name}</span>
+            <span className="text-slate-300 dark:text-zinc-600">|</span>
+            <span className="text-slate-600 dark:text-zinc-400 text-[11px] flex items-center gap-1">
+              <HardDrive className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
               {activeFile.cloudProvider}
             </span>
-            <span className="text-zinc-600">|</span>
-            <span className="text-[11px] text-zinc-500">
+            <span className="text-slate-300 dark:text-zinc-600">|</span>
+            <span className="text-[11px] text-slate-500 dark:text-zinc-500">
               {lineCount} lines, {charCount} chars
             </span>
-            <span className="text-zinc-600">|</span>
+            <span className="text-slate-300 dark:text-zinc-600">|</span>
             {activeFile.isLoadingContent ? (
-              <span className="text-[11px] text-blue-400">Loading...</span>
+              <span className="text-[11px] text-blue-600 dark:text-blue-400">Loading...</span>
             ) : isReadOnly ? (
-              <span className="text-[11px] text-red-400 flex items-center gap-1">
+              <span className="text-[11px] text-red-600 dark:text-red-400 flex items-center gap-1">
                 <Lock className="w-3 h-3" />
                 Read-Only
               </span>
             ) : isCurrentDirty ? (
-              <span className="text-[11px] text-blue-400 flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+              <span className="text-[11px] text-blue-600 dark:text-blue-400 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-600 dark:bg-blue-400" />
                 Unsaved
               </span>
             ) : (
-              <span className="text-[11px] text-emerald-400 flex items-center gap-1">
+              <span className="text-[11px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
                 <Check className="w-3 h-3" />
                 Saved
               </span>
             )}
           </div>
         ) : (
-          <span className="text-zinc-500 italic">No file selected</span>
+          <span className="text-slate-400 dark:text-zinc-500 italic">No file selected</span>
         )}
       </div>
 
@@ -229,19 +229,19 @@ export const Header: React.FC<HeaderProps> = ({
 
         <button
           onClick={onOpenQuickOpen}
-          className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-800 text-xs transition"
+          className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-100 dark:bg-zinc-900 hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 hover:text-slate-950 dark:hover:text-white border border-slate-200 dark:border-zinc-800 text-xs transition"
           title="Quick Open File (Cmd+P / Ctrl+P)"
         >
-          <Search className="w-3.5 h-3.5 text-zinc-400" />
+          <Search className="w-3.5 h-3.5 text-slate-500 dark:text-zinc-400" />
           <span className="font-sans">Open</span>
-          <kbd className="text-[10px] font-mono text-zinc-500 bg-zinc-800 px-1 rounded">
+          <kbd className="text-[10px] font-mono text-slate-500 dark:text-zinc-500 bg-slate-200 dark:bg-zinc-800 px-1 rounded">
             ⌘P
           </kbd>
         </button>
 
         <button
           onClick={onOpenSearch}
-          className="p-1.5 rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-800 transition"
+          className="p-1.5 rounded bg-slate-100 dark:bg-zinc-900 hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 hover:text-slate-950 dark:hover:text-white border border-slate-200 dark:border-zinc-800 transition"
           title="Search in Files (Cmd+Shift+F)"
         >
           <FileSearch className="w-3.5 h-3.5" />
@@ -251,16 +251,17 @@ export const Header: React.FC<HeaderProps> = ({
           <select
             value={activeTheme}
             onChange={e => onThemeChange(e.target.value as EditorTheme)}
-            className="appearance-none bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-800 text-xs rounded px-2.5 py-1 pr-6 cursor-pointer focus:outline-none focus:border-emerald-500"
+            className="appearance-none bg-slate-100 dark:bg-zinc-900 hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 hover:text-slate-950 dark:hover:text-white border border-slate-200 dark:border-zinc-800 text-xs rounded px-2.5 py-1 pr-6 cursor-pointer focus:outline-none focus:border-emerald-500"
             title="Monarch Editor Theme"
           >
             <option value="freshfood-dark">FreshFood Dark</option>
             <option value="freshfood-cyber">High Contrast Cyber</option>
             <option value="freshfood-light">FreshFood Light</option>
             <option value="vs-dark">VS Dark+</option>
+            <option value="vs">VS Light</option>
             <option value="hc-black">High Contrast Black</option>
           </select>
-          <ChevronDown className="w-3 h-3 text-zinc-400 absolute right-2 top-2 pointer-events-none" />
+          <ChevronDown className="w-3 h-3 text-slate-500 dark:text-zinc-400 absolute right-2 top-2 pointer-events-none" />
         </div>
 
         {/* Save Current File */}
@@ -270,7 +271,7 @@ export const Header: React.FC<HeaderProps> = ({
           className={`flex items-center gap-1.5 px-3 py-1 rounded font-medium text-xs transition ${
             isCurrentDirty && !isReadOnly
               ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-md font-semibold'
-              : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white border border-zinc-700'
+              : 'bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 hover:text-slate-950 dark:hover:text-white border border-slate-300 dark:border-zinc-700'
           } disabled:opacity-40 disabled:pointer-events-none`}
           title={
             isReadOnly
@@ -293,14 +294,14 @@ export const Header: React.FC<HeaderProps> = ({
         <button
           onClick={onSaveAll}
           disabled={isSaving || nonDirFiles.length === 0 || isReadOnly || !canSave}
-          className="flex items-center gap-1.5 px-3 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 text-xs transition relative font-medium disabled:opacity-40 disabled:pointer-events-none"
+          className="flex items-center gap-1.5 px-3 py-1 rounded bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-200 border border-slate-300 dark:border-zinc-700 text-xs transition relative font-medium disabled:opacity-40 disabled:pointer-events-none"
           title={
             isReadOnly
               ? 'Save All disabled in read-only mode'
               : 'Save all modified files via H2_SAVE_FILE_REQ'
           }
         >
-          <Cloud className="w-3.5 h-3.5 text-emerald-400" />
+          <Cloud className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
           <span className="hidden lg:inline">Save All</span>
           {dirtyFilesCount > 0 && !isReadOnly && (
             <span className="px-1.5 py-0.2 rounded-full bg-blue-600 text-white font-bold text-[10px]">
@@ -311,7 +312,7 @@ export const Header: React.FC<HeaderProps> = ({
 
         <button
           onClick={onOpenShortcutsModal}
-          className="p-1.5 rounded hover:bg-zinc-800 text-zinc-400 hover:text-white transition"
+          className="p-1.5 rounded hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white transition"
           title="Shortcuts & Docs"
         >
           <HelpCircle className="w-4 h-4" />

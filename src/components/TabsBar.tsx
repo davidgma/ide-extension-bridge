@@ -43,29 +43,29 @@ export const TabsBar: React.FC<TabsBarProps> = ({
 
   const getTabIcon = (filename: string) => {
     const ext = getFileExtension(filename);
-    if (isImageFile(filename)) return <ImageIcon className="w-3.5 h-3.5 text-pink-400" />;
-    if (isVideoFile(filename)) return <Film className="w-3.5 h-3.5 text-purple-400" />;
-    if (['ts', 'tsx'].includes(ext)) return <Code2 className="w-3.5 h-3.5 text-blue-400" />;
-    if (['js', 'jsx'].includes(ext)) return <FileCode className="w-3.5 h-3.5 text-amber-400" />;
-    if (['json'].includes(ext)) return <FileJson className="w-3.5 h-3.5 text-emerald-400" />;
-    if (['css', 'scss'].includes(ext)) return <FileCode className="w-3.5 h-3.5 text-sky-400" />;
-    if (['md', 'markdown'].includes(ext)) return <FileText className="w-3.5 h-3.5 text-teal-400" />;
-    if (['sql'].includes(ext)) return <Database className="w-3.5 h-3.5 text-indigo-400" />;
-    if (['py'].includes(ext)) return <FileCode className="w-3.5 h-3.5 text-yellow-500" />;
-    if (['sh', 'bash'].includes(ext)) return <Terminal className="w-3.5 h-3.5 text-green-400" />;
-    return <FileCode className="w-3.5 h-3.5 text-zinc-400" />;
+    if (isImageFile(filename)) return <ImageIcon className="w-3.5 h-3.5 text-red-500 dark:text-red-400" />;
+    if (isVideoFile(filename)) return <Film className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />;
+    if (['ts', 'tsx'].includes(ext)) return <Code2 className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />;
+    if (['js', 'jsx'].includes(ext)) return <FileCode className="w-3.5 h-3.5 text-red-600 dark:text-red-400" />;
+    if (['json'].includes(ext)) return <FileJson className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />;
+    if (['css', 'scss'].includes(ext)) return <FileCode className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />;
+    if (['md', 'markdown'].includes(ext)) return <FileText className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />;
+    if (['sql'].includes(ext)) return <Database className="w-3.5 h-3.5 text-blue-600 dark:text-blue-300" />;
+    if (['py'].includes(ext)) return <FileCode className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />;
+    if (['sh', 'bash'].includes(ext)) return <Terminal className="w-3.5 h-3.5 text-green-600 dark:text-green-400" />;
+    return <FileCode className="w-3.5 h-3.5 text-slate-500 dark:text-zinc-400" />;
   };
 
   if (openTabs.length === 0) {
     return (
-      <div className="h-9 bg-[#1e1e20] border-b border-zinc-800 flex items-center px-4 text-xs text-zinc-500 italic">
+      <div className="h-9 bg-slate-100 dark:bg-[#1e1e20] border-b border-slate-200 dark:border-zinc-800 flex items-center px-4 text-xs text-slate-500 dark:text-zinc-500 italic">
         No files open. Click a file in the sidebar or press Cmd+P to open.
       </div>
     );
   }
 
   return (
-    <div className="h-9 bg-[#1b1b1e] border-b border-zinc-800/90 flex items-center justify-between select-auto overflow-hidden">
+    <div className="h-9 bg-slate-100 dark:bg-[#1b1b1e] border-b border-slate-200 dark:border-zinc-800/90 flex items-center justify-between select-auto overflow-hidden">
       {/* Scrollable Tabs */}
       <div className="flex items-center h-full overflow-x-auto no-scrollbar flex-1">
         {openTabs.map(tab => {
@@ -82,15 +82,15 @@ export const TabsBar: React.FC<TabsBarProps> = ({
                 onCloseOtherTabs(tab.fileId);
               }}
               title={`${tab.path} ${isDirty ? '(Unsaved Changes)' : ''}`}
-              className={`group relative h-full flex items-center gap-2 px-3 border-r border-zinc-800/80 cursor-pointer text-xs transition-colors shrink-0 ${
+              className={`group relative h-full flex items-center gap-2 px-3 border-r border-slate-200 dark:border-zinc-800/80 cursor-pointer text-xs transition-colors shrink-0 ${
                 isActive
-                  ? 'bg-[#18181b] text-white font-medium shadow-inner'
-                  : 'bg-[#212124] text-zinc-400 hover:bg-[#252529] hover:text-zinc-200'
+                  ? 'bg-white dark:bg-[#18181b] text-slate-900 dark:text-white font-medium shadow-inner'
+                  : 'bg-slate-100 dark:bg-[#212124] text-slate-600 dark:text-zinc-400 hover:bg-slate-200/70 dark:hover:bg-[#252529] hover:text-slate-900 dark:hover:text-zinc-200'
               }`}
             >
               {/* Active top accent line */}
               {isActive && (
-                <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-emerald-500 to-teal-400" />
+                <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-blue-600 to-emerald-500" />
               )}
 
               {/* Icon */}
@@ -105,14 +105,14 @@ export const TabsBar: React.FC<TabsBarProps> = ({
               <div className="flex items-center ml-1">
                 {isDirty ? (
                   <span
-                    className="w-2 h-2 rounded-full bg-amber-400 group-hover:hidden animate-pulse"
+                    className="w-2 h-2 rounded-full bg-red-500 dark:bg-red-400 group-hover:hidden animate-pulse"
                     title="Unsaved Changes"
                   />
                 ) : null}
 
                 <button
                   onClick={e => onCloseTab(tab.fileId, e)}
-                  className={`p-0.5 rounded hover:bg-zinc-700/80 hover:text-white text-zinc-400 transition ${
+                  className={`p-0.5 rounded hover:bg-slate-200 dark:hover:bg-zinc-700/80 hover:text-slate-900 dark:hover:text-white text-slate-400 dark:text-zinc-400 transition ${
                     isDirty ? 'hidden group-hover:block' : 'opacity-60 group-hover:opacity-100'
                   }`}
                   title="Close tab (Cmd+W)"
@@ -126,13 +126,15 @@ export const TabsBar: React.FC<TabsBarProps> = ({
       </div>
 
       {/* Right controls: Markdown preview toggles & close actions */}
-      <div className="flex items-center gap-1 px-2 border-l border-zinc-800/80 bg-[#1b1b1e] shrink-0">
+      <div className="flex items-center gap-1 px-2 border-l border-slate-200 dark:border-zinc-800/80 bg-slate-100 dark:bg-[#1b1b1e] shrink-0">
         {isMd && activeTab && (
-          <div className="flex items-center bg-zinc-900/90 rounded border border-zinc-750 p-0.5 mr-2">
+          <div className="flex items-center bg-white dark:bg-zinc-900/90 rounded border border-slate-200 dark:border-zinc-700 p-0.5 mr-2">
             <button
               onClick={() => onSetPreviewMode(activeTab.fileId, 'code')}
               className={`p-1 rounded text-[11px] flex items-center gap-1 transition ${
-                activeTab.previewMode === 'code' ? 'bg-emerald-600 text-black font-semibold' : 'text-zinc-400 hover:text-white'
+                activeTab.previewMode === 'code'
+                  ? 'bg-blue-600 text-white font-semibold'
+                  : 'text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
               }`}
               title="Code Editor Only"
             >
@@ -141,7 +143,9 @@ export const TabsBar: React.FC<TabsBarProps> = ({
             <button
               onClick={() => onSetPreviewMode(activeTab.fileId, 'split')}
               className={`p-1 rounded text-[11px] flex items-center gap-1 transition ${
-                activeTab.previewMode === 'split' ? 'bg-emerald-600 text-black font-semibold' : 'text-zinc-400 hover:text-white'
+                activeTab.previewMode === 'split'
+                  ? 'bg-blue-600 text-white font-semibold'
+                  : 'text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
               }`}
               title="Split Code & Preview"
             >
@@ -150,7 +154,9 @@ export const TabsBar: React.FC<TabsBarProps> = ({
             <button
               onClick={() => onSetPreviewMode(activeTab.fileId, 'preview')}
               className={`p-1 rounded text-[11px] flex items-center gap-1 transition ${
-                activeTab.previewMode === 'preview' ? 'bg-emerald-600 text-black font-semibold' : 'text-zinc-400 hover:text-white'
+                activeTab.previewMode === 'preview'
+                  ? 'bg-blue-600 text-white font-semibold'
+                  : 'text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
               }`}
               title="Rendered Markdown Preview"
             >
@@ -161,7 +167,7 @@ export const TabsBar: React.FC<TabsBarProps> = ({
 
         <button
           onClick={onCloseAllTabs}
-          className="text-[11px] text-zinc-400 hover:text-zinc-200 px-2 py-1 rounded hover:bg-zinc-800 transition"
+          className="text-[11px] text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 px-2 py-1 rounded hover:bg-slate-200 dark:hover:bg-zinc-800 transition"
           title="Close All Tabs"
         >
           Close All

@@ -1,8 +1,18 @@
+/**
+ * Global Tailwind CSS v4 entry and Light/Dark theme base rules.
+ * Uses `@custom-variant dark` so Tailwind `dark:` utilities follow the `.dark` class
+ * toggled on `<html>` by useIdeSettings rather than only OS media preferences.
+ *
+ * Official Documentation:
+ * - Tailwind CSS v4 Dark Mode: https://tailwindcss.com/docs/dark-mode#toggling-dark-mode-manually
+ */
 @import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
 
 @layer base {
   body {
-    @apply bg-[#1e1e1e] text-[#cccccc] font-sans antialiased overflow-hidden select-auto;
+    @apply bg-slate-50 text-slate-900 dark:bg-[#1e1e1e] dark:text-[#cccccc] font-sans antialiased overflow-hidden select-auto;
     margin: 0;
     padding: 0;
     height: 100vh;
@@ -21,12 +31,20 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(100, 116, 139, 0.28);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background: rgba(100, 116, 139, 0.45);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.28);
 }
 
 .font-mono-code {

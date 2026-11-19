@@ -151,48 +151,48 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
 
   return (
     <div
-      className="bg-[#121214] border-t-2 border-emerald-500/80 flex flex-col font-mono text-xs select-auto shadow-2xl z-40 relative"
+      className="bg-slate-50 dark:bg-[#121214] border-t-2 border-emerald-500/80 flex flex-col font-mono text-xs select-auto shadow-2xl z-40 relative"
       style={{ height: `${height}px` }}
     >
       {/* Resizable Top Border Handle */}
       <div
         onMouseDown={handleMouseDown}
-        className="h-2 w-full bg-emerald-500/50 hover:bg-emerald-400 cursor-ns-resize transition-colors flex items-center justify-center shrink-0 group"
+        className="h-2 w-full bg-emerald-500/40 dark:bg-emerald-500/50 hover:bg-emerald-500 dark:hover:bg-emerald-400 cursor-ns-resize transition-colors flex items-center justify-center shrink-0 group"
         title="Drag up or down to resize Extension Bridge Debugger"
       >
-        <div className="w-14 h-1 bg-emerald-300/80 rounded-full group-hover:bg-white transition-colors" />
+        <div className="w-14 h-1 bg-emerald-700/70 dark:bg-emerald-300/80 rounded-full group-hover:bg-white transition-colors" />
       </div>
 
       {/* Top Header Bar */}
-      <div className="flex flex-wrap items-center justify-between px-3 py-1.5 bg-[#1a1a1e] border-b border-zinc-800 select-auto gap-2 shrink-0">
+      <div className="flex flex-wrap items-center justify-between px-3 py-1.5 bg-slate-100 dark:bg-[#1a1a1e] border-b border-slate-200 dark:border-zinc-800 select-auto gap-2 shrink-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="p-1 rounded bg-emerald-950 border border-emerald-500/40 text-emerald-400">
+          <div className="p-1 rounded bg-emerald-100 dark:bg-emerald-950 border border-emerald-500/40 text-emerald-700 dark:text-emerald-400">
             <Bug className="w-3.5 h-3.5" />
           </div>
-          <span className="font-bold text-white text-xs tracking-tight">
+          <span className="font-bold text-slate-900 dark:text-white text-xs tracking-tight">
             Extension Bridge Debugger (v1.3)
           </span>
 
           <div
             className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
               extensionStatus === 'connected'
-                ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/50'
+                ? 'bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border-emerald-500/40 dark:border-emerald-500/50'
                 : extensionStatus === 'connecting'
-                ? 'bg-blue-950/80 text-blue-300 border-blue-500/50'
+                ? 'bg-blue-50 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 border-blue-500/40 dark:border-blue-500/50'
                 : connectionReasonCode
-                ? 'bg-red-950/80 text-red-300 border-red-500/50'
-                : 'bg-zinc-900 text-zinc-400 border-zinc-700'
+                ? 'bg-red-50 dark:bg-red-950/80 text-red-700 dark:text-red-300 border-red-500/40 dark:border-red-500/50'
+                : 'bg-white dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 border-slate-300 dark:border-zinc-700'
             }`}
           >
             <span
               className={`w-1.5 h-1.5 rounded-full ${
                 extensionStatus === 'connected'
-                  ? 'bg-emerald-400 animate-pulse'
+                  ? 'bg-emerald-500 dark:bg-emerald-400 animate-pulse'
                   : extensionStatus === 'connecting'
-                  ? 'bg-blue-400 animate-pulse'
+                  ? 'bg-blue-500 dark:bg-blue-400 animate-pulse'
                   : connectionReasonCode
-                  ? 'bg-red-400'
-                  : 'bg-zinc-500'
+                  ? 'bg-red-500 dark:bg-red-400'
+                  : 'bg-slate-400 dark:bg-zinc-500'
               }`}
             />
             <span>
@@ -208,21 +208,21 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
             onClick={() => setShowTargetDetails(!showTargetDetails)}
             className={`px-2 py-0.5 rounded text-[10px] border transition flex items-center gap-1 ${
               showTargetDetails
-                ? 'bg-zinc-800 text-emerald-300 border-emerald-500/40'
-                : 'bg-zinc-900 text-zinc-400 border-zinc-800'
+                ? 'bg-white dark:bg-zinc-800 text-emerald-700 dark:text-emerald-300 border-emerald-500/40 shadow-xs'
+                : 'bg-slate-200/70 dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 border-slate-300 dark:border-zinc-800'
             }`}
           >
-            <Globe className="w-3 h-3 text-emerald-400" />
+            <Globe className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
             <span>Session & Target Specs</span>
           </button>
         </div>
 
         {/* Filters */}
-        <div className="flex items-center gap-1 bg-zinc-900/90 rounded border border-zinc-800 p-0.5">
+        <div className="flex items-center gap-1 bg-white dark:bg-zinc-900/90 rounded border border-slate-200 dark:border-zinc-800 p-0.5">
           <button
             onClick={() => setFilter('all')}
             className={`px-2 py-0.5 rounded text-[10px] transition ${
-              filter === 'all' ? 'bg-emerald-600 text-white font-bold' : 'text-zinc-400 hover:text-white'
+              filter === 'all' ? 'bg-emerald-600 text-white font-bold' : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
             All ({messagesLog.length})
@@ -230,7 +230,7 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
           <button
             onClick={() => setFilter('outgoing')}
             className={`px-2 py-0.5 rounded text-[10px] transition ${
-              filter === 'outgoing' ? 'bg-blue-600 text-white font-bold' : 'text-zinc-400 hover:text-white'
+              filter === 'outgoing' ? 'bg-blue-600 text-white font-bold' : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
             Outgoing ↗
@@ -238,7 +238,7 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
           <button
             onClick={() => setFilter('incoming')}
             className={`px-2 py-0.5 rounded text-[10px] transition ${
-              filter === 'incoming' ? 'bg-emerald-600 text-white font-bold' : 'text-zinc-400 hover:text-white'
+              filter === 'incoming' ? 'bg-emerald-600 text-white font-bold' : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
             Incoming ↙
@@ -246,7 +246,7 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
           <button
             onClick={() => setFilter('fileOps')}
             className={`px-2 py-0.5 rounded text-[10px] transition ${
-              filter === 'fileOps' ? 'bg-emerald-600 text-white font-bold' : 'text-zinc-400 hover:text-white'
+              filter === 'fileOps' ? 'bg-emerald-600 text-white font-bold' : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
             Tree / File Ops
@@ -254,7 +254,7 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
           <button
             onClick={() => setFilter('errors')}
             className={`px-2 py-0.5 rounded text-[10px] transition ${
-              filter === 'errors' ? 'bg-red-600 text-white font-bold' : 'text-zinc-400 hover:text-white'
+              filter === 'errors' ? 'bg-red-600 text-white font-bold' : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
             Errors
@@ -274,13 +274,13 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
 
           <button
             onClick={handleCopyAllLogs}
-            className="flex items-center gap-1 px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 text-[10.5px] transition"
+            className="flex items-center gap-1 px-2 py-0.5 rounded bg-white dark:bg-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 border border-slate-300 dark:border-zinc-700 text-[10.5px] transition"
             title="Copy full JSON debug log"
           >
             {isLogCopied ? (
               <>
-                <Check className="w-3 h-3 text-emerald-400" />
-                <span className="text-emerald-400">Copied</span>
+                <Check className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                <span className="text-emerald-600 dark:text-emerald-400">Copied</span>
               </>
             ) : (
               <>
@@ -292,7 +292,7 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
 
           <button
             onClick={onClearLogs}
-            className="p-1 hover:bg-zinc-800 text-zinc-400 hover:text-red-400 rounded transition"
+            className="p-1 hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-500 dark:text-zinc-400 hover:text-red-600 dark:hover:text-red-400 rounded transition"
             title="Clear debug stream"
           >
             <Trash2 className="w-3.5 h-3.5" />
@@ -300,7 +300,7 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
 
           <button
             onClick={onClose}
-            className="p-1 hover:bg-zinc-800 text-zinc-400 hover:text-white rounded transition"
+            className="p-1 hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white rounded transition"
             title="Close debug panel"
           >
             <X className="w-3.5 h-3.5" />
@@ -310,41 +310,41 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
 
       {/* Target Destination & H2 Session Bar */}
       {showTargetDetails && (
-        <div className="bg-[#161619] border-b border-zinc-800 p-2.5 px-3 text-[11px] space-y-1.5 shrink-0">
+        <div className="bg-slate-100/80 dark:bg-[#161619] border-b border-slate-200 dark:border-zinc-800 p-2.5 px-3 text-[11px] space-y-1.5 shrink-0">
           {connectionError && (
-            <div className="p-2 rounded bg-red-950/50 border border-red-500/40 text-red-200 text-[10.5px]">
+            <div className="p-2 rounded bg-red-50 dark:bg-red-950/50 border border-red-300 dark:border-red-500/40 text-red-700 dark:text-red-200 text-[10.5px]">
               {connectionReasonCode ? `[${connectionReasonCode}] ` : ''}
               {connectionError}
             </div>
           )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 font-mono text-[10.5px]">
-            <div className="p-1.5 rounded bg-zinc-900 border border-zinc-800">
-              <div className="text-zinc-500 text-[9.5px]">Protocol & Mode:</div>
-              <div className="text-emerald-300 font-semibold">
+            <div className="p-1.5 rounded bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800">
+              <div className="text-slate-500 dark:text-zinc-500 text-[9.5px]">Protocol & Mode:</div>
+              <div className="text-emerald-700 dark:text-emerald-300 font-semibold">
                 H2_CLOUD_BRIDGE v1.3 ({handshakeInfo?.sessionMode || 'unconnected'})
               </div>
             </div>
 
-            <div className="p-1.5 rounded bg-zinc-900 border border-zinc-800">
-              <div className="text-zinc-500 text-[9.5px]">
+            <div className="p-1.5 rounded bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800">
+              <div className="text-slate-500 dark:text-zinc-500 text-[9.5px]">
                 sessionStorage ({H2_SESSION_STORAGE_KEY}):
               </div>
-              <div className="text-white truncate font-semibold" title={sessionId || 'None active'}>
+              <div className="text-slate-900 dark:text-white truncate font-semibold" title={sessionId || 'None active'}>
                 {sessionId || 'No active session'}
               </div>
             </div>
 
-            <div className="p-1.5 rounded bg-zinc-900 border border-zinc-800">
-              <div className="text-zinc-500 text-[9.5px]">Origin & Access Mode:</div>
-              <div className="text-blue-300 truncate font-semibold">
+            <div className="p-1.5 rounded bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800">
+              <div className="text-slate-500 dark:text-zinc-500 text-[9.5px]">Origin & Access Mode:</div>
+              <div className="text-blue-700 dark:text-blue-300 truncate font-semibold">
                 {currentOrigin} ({handshakeInfo?.accessMode || 'readwrite'})
               </div>
             </div>
 
-            <div className="p-1.5 rounded bg-zinc-900 border border-zinc-800">
-              <div className="text-zinc-500 text-[9.5px]">Scope & Drive Root:</div>
-              <div className="text-emerald-300 truncate font-semibold">
+            <div className="p-1.5 rounded bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800">
+              <div className="text-slate-500 dark:text-zinc-500 text-[9.5px]">Scope & Drive Root:</div>
+              <div className="text-emerald-700 dark:text-emerald-300 truncate font-semibold">
                 {handshakeInfo?.launchedScope
                   ? `${handshakeInfo.launchedScope.provider}:${handshakeInfo.launchedScope.rootName} (driveRoot: ${handshakeInfo.driveRootActive ? 'true' : 'false'})`
                   : `provider: ${handshakeInfo?.provider || 'none'}`}
@@ -353,7 +353,7 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
           </div>
 
           {handshakeInfo?.drives && (
-            <div className="flex flex-wrap items-center gap-2 text-[10px] text-zinc-400 pt-1">
+            <div className="flex flex-wrap items-center gap-2 text-[10px] text-slate-600 dark:text-zinc-400 pt-1">
               <span>Drives:</span>
               {Object.entries(handshakeInfo.drives).map(([drive, st]) => (
                 <span
@@ -361,9 +361,9 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
                   className={`px-1.5 py-0.2 rounded border ${
                     st.connected
                       ? st.visible
-                        ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/30'
-                        : 'bg-blue-950/60 text-blue-300 border-blue-500/30'
-                      : 'bg-zinc-900 text-zinc-500 border-zinc-800'
+                        ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-500/30'
+                        : 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-500/30'
+                      : 'bg-white dark:bg-zinc-900 text-slate-500 dark:text-zinc-500 border-slate-200 dark:border-zinc-800'
                   }`}
                 >
                   {drive}: {st.connected ? (st.visible ? 'connected' : 'connected (hidden)') : 'offline'}
@@ -373,15 +373,15 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
           )}
 
           {handshakeInfo?.capabilities && (
-            <div className="flex flex-wrap items-center gap-2 text-[10px] text-zinc-400">
+            <div className="flex flex-wrap items-center gap-2 text-[10px] text-slate-600 dark:text-zinc-400">
               <span>Capabilities:</span>
               {Object.entries(handshakeInfo.capabilities).map(([cap, enabled]) => (
                 <span
                   key={cap}
                   className={`px-1.5 py-0.2 rounded border ${
                     enabled
-                      ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/30'
-                      : 'bg-zinc-900 text-zinc-500 border-zinc-800'
+                      ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-500/30'
+                      : 'bg-white dark:bg-zinc-900 text-slate-500 dark:text-zinc-500 border-slate-200 dark:border-zinc-800'
                   }`}
                 >
                   {cap}: {enabled ? 'true' : 'false'}
@@ -393,11 +393,11 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
       )}
 
       {/* Main Debug Stream List */}
-      <div className="flex-1 overflow-y-auto p-2 space-y-1 bg-[#0b0b0d]">
+      <div className="flex-1 overflow-y-auto p-2 space-y-1 bg-white dark:bg-[#0b0b0d]">
         {filteredMessages.length === 0 ? (
-          <div className="p-8 text-center text-zinc-500 text-xs italic space-y-2">
+          <div className="p-8 text-center text-slate-500 dark:text-zinc-500 text-xs italic space-y-2">
             <div>No H2_CLOUD_BRIDGE communication logged yet.</div>
-            <div className="text-[11px] text-zinc-600 font-mono">
+            <div className="text-[11px] text-slate-400 dark:text-zinc-600 font-mono">
               Click Connect (H2_CONNECT_REQ) to start a v1.3 session over window.postMessage.
             </div>
           </div>
@@ -426,31 +426,31 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
                 onClick={() => toggleExpand(msg.id)}
                 className={`rounded border transition cursor-pointer text-[11px] ${
                   isError
-                    ? 'bg-red-950/20 border-red-500/40 hover:border-red-400'
+                    ? 'bg-red-50/80 dark:bg-red-950/20 border-red-300 dark:border-red-500/40 hover:border-red-500 dark:hover:border-red-400'
                     : isFileOp
-                    ? 'bg-emerald-950/20 border-emerald-500/30 hover:border-emerald-400/60'
-                    : 'bg-zinc-900/50 border-zinc-800 hover:border-zinc-700'
+                    ? 'bg-emerald-50/60 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-500/30 hover:border-emerald-400 dark:hover:border-emerald-400/60'
+                    : 'bg-slate-50 dark:bg-zinc-900/50 border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700'
                 }`}
               >
                 <div className="flex items-center justify-between px-2.5 py-1.5 select-auto">
                   <div className="flex items-center gap-2 truncate">
                     {isExpanded ? (
-                      <ChevronDown className="w-3 h-3 text-zinc-400 shrink-0" />
+                      <ChevronDown className="w-3 h-3 text-slate-500 dark:text-zinc-400 shrink-0" />
                     ) : (
-                      <ChevronRight className="w-3 h-3 text-zinc-400 shrink-0" />
+                      <ChevronRight className="w-3 h-3 text-slate-500 dark:text-zinc-400 shrink-0" />
                     )}
 
-                    <span className="text-zinc-400 font-mono text-[10px] shrink-0">
+                    <span className="text-slate-500 dark:text-zinc-400 font-mono text-[10px] shrink-0">
                       {msg.formattedTime}
                     </span>
 
                     <span
                       className={`px-1.5 py-0.2 rounded font-bold text-[9px] flex items-center gap-1 shrink-0 ${
                         isOutgoing
-                          ? 'bg-blue-950 text-blue-300 border border-blue-500/30'
+                          ? 'bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-500/30'
                           : msg.direction === 'incoming'
-                          ? 'bg-emerald-950 text-emerald-300 border border-emerald-500/30'
-                          : 'bg-red-950 text-red-300 border border-red-500/30'
+                          ? 'bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30'
+                          : 'bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-500/30'
                       }`}
                     >
                       {isOutgoing ? (
@@ -467,14 +467,18 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
 
                     <span
                       className={`font-semibold font-mono truncate ${
-                        isError ? 'text-red-400' : isFileOp ? 'text-emerald-300' : 'text-white'
+                        isError
+                          ? 'text-red-700 dark:text-red-400'
+                          : isFileOp
+                          ? 'text-emerald-700 dark:text-emerald-300'
+                          : 'text-slate-900 dark:text-white'
                       }`}
                     >
                       {msg.type}
                     </span>
 
                     {msg.requestId && (
-                      <span className="text-zinc-500 font-mono text-[10px] truncate hidden sm:inline">
+                      <span className="text-slate-500 dark:text-zinc-500 font-mono text-[10px] truncate hidden sm:inline">
                         [{msg.requestId}]
                       </span>
                     )}
@@ -482,7 +486,7 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
 
                   <div className="flex items-center gap-2 shrink-0">
                     {msg.roundtripMs !== undefined && (
-                      <span className="text-zinc-500 text-[10px] font-mono">
+                      <span className="text-slate-500 dark:text-zinc-500 text-[10px] font-mono">
                         {msg.roundtripMs}ms
                       </span>
                     )}
@@ -490,10 +494,10 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
                     <span
                       className={`px-1.5 py-0.2 rounded text-[9.5px] font-bold ${
                         msg.status === 'received'
-                          ? 'bg-emerald-950 text-emerald-400 border border-emerald-500/30'
+                          ? 'bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/30'
                           : msg.status === 'error' || msg.status === 'timeout'
-                          ? 'bg-red-950 text-red-400 border border-red-500/30'
-                          : 'bg-blue-950 text-blue-300 border border-blue-500/30'
+                          ? 'bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-500/30'
+                          : 'bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-500/30'
                       }`}
                     >
                       {msg.status || 'sent'}
@@ -501,11 +505,11 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
 
                     <button
                       onClick={e => handleCopyMessage(msg, e)}
-                      className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
+                      className="p-1 hover:bg-slate-200 dark:hover:bg-zinc-800 rounded text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white transition"
                       title="Copy message JSON"
                     >
                       {copiedId === msg.id ? (
-                        <Check className="w-3 h-3 text-emerald-400" />
+                        <Check className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
                       ) : (
                         <Copy className="w-3 h-3" />
                       )}
@@ -514,27 +518,27 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
                 </div>
 
                 {isExpanded && (
-                  <div className="p-3 bg-black/80 border-t border-zinc-800/80 font-mono text-[10.5px] space-y-3">
+                  <div className="p-3 bg-slate-100 dark:bg-black/80 border-t border-slate-200 dark:border-zinc-800/80 font-mono text-[10.5px] space-y-3">
                     {info && (
-                      <div className="p-2.5 rounded bg-zinc-950 border border-zinc-800 space-y-1">
-                        <div className="text-emerald-400 font-bold text-[10px] flex items-center gap-1.5 mb-1">
+                      <div className="p-2.5 rounded bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 space-y-1">
+                        <div className="text-emerald-700 dark:text-emerald-400 font-bold text-[10px] flex items-center gap-1.5 mb-1">
                           <Globe className="w-3 h-3" />
                           <span>Dispatch Target & Session Details:</span>
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-[10px] text-zinc-300">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-[10px] text-slate-700 dark:text-zinc-300">
                           <div>
-                            Target URL: <span className="text-emerald-300 font-bold">{info.url}</span>
+                            Target URL: <span className="text-emerald-700 dark:text-emerald-300 font-bold">{info.url}</span>
                           </div>
                           <div>
-                            Target Origin: <span className="text-white font-bold">{info.origin}</span>
+                            Target Origin: <span className="text-slate-900 dark:text-white font-bold">{info.origin}</span>
                           </div>
                           <div>
                             postMessage Target:{' '}
-                            <span className="text-blue-300 font-bold">{info.postMessageTarget}</span>
+                            <span className="text-blue-700 dark:text-blue-300 font-bold">{info.postMessageTarget}</span>
                           </div>
                           <div>
                             Session ID:{' '}
-                            <span className="text-emerald-300 font-bold">
+                            <span className="text-emerald-700 dark:text-emerald-300 font-bold">
                               {msg.sessionId || info.sessionId || 'none'}
                             </span>
                           </div>
@@ -543,10 +547,10 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
                     )}
 
                     <div>
-                      <div className="text-zinc-400 text-[10px] mb-1 font-bold tracking-wider">
+                      <div className="text-slate-600 dark:text-zinc-400 text-[10px] mb-1 font-bold tracking-wider">
                         Message Envelope:
                       </div>
-                      <pre className="p-2.5 rounded bg-zinc-950 border border-zinc-850 text-emerald-300 overflow-x-auto whitespace-pre-wrap leading-relaxed">
+                      <pre className="p-2.5 rounded bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 text-emerald-700 dark:text-emerald-300 overflow-x-auto whitespace-pre-wrap leading-relaxed">
                         <code>{JSON.stringify(msg.payload, null, 2)}</code>
                       </pre>
                     </div>
@@ -559,14 +563,14 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
       </div>
 
       {/* Footer */}
-      <div className="px-3 py-1 bg-[#18181c] border-t border-zinc-800/80 flex items-center justify-between text-[10.5px] text-zinc-400 shrink-0">
+      <div className="px-3 py-1 bg-slate-100 dark:bg-[#18181c] border-t border-slate-200 dark:border-zinc-800/80 flex items-center justify-between text-[10.5px] text-slate-600 dark:text-zinc-400 shrink-0">
         <div className="flex items-center gap-2">
           <span>Transport:</span>
-          <span className="text-emerald-400">window.postMessage(envelope, window.location.origin)</span>
+          <span className="text-emerald-700 dark:text-emerald-400">window.postMessage(envelope, window.location.origin)</span>
         </div>
         <div className="flex items-center gap-2">
           <span>
-            Active Origin: <strong className="text-zinc-200">{currentOrigin}</strong>
+            Active Origin: <strong className="text-slate-900 dark:text-zinc-200">{currentOrigin}</strong>
           </span>
         </div>
       </div>

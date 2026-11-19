@@ -58,16 +58,16 @@ export const QuickOpenModal: React.FC<QuickOpenModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center pt-20 bg-black/60 backdrop-blur-xs p-4"
+      className="fixed inset-0 z-50 flex items-start justify-center pt-20 bg-black/40 dark:bg-black/60 backdrop-blur-xs p-4"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-xl bg-[#1c1c1f] border border-zinc-700/80 rounded-xl shadow-2xl overflow-hidden select-auto"
+        className="w-full max-w-xl bg-white dark:bg-[#1c1c1f] border border-slate-300 dark:border-zinc-700/80 rounded-xl shadow-2xl overflow-hidden select-auto"
         onClick={e => e.stopPropagation()}
       >
         {/* Search Input Bar */}
-        <div className="flex items-center px-4 py-3 border-b border-zinc-800 bg-zinc-900/90">
-          <Search className="w-4 h-4 text-emerald-400 mr-2 shrink-0" />
+        <div className="flex items-center px-4 py-3 border-b border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/90">
+          <Search className="w-4 h-4 text-emerald-600 dark:text-emerald-400 mr-2 shrink-0" />
           <input
             ref={inputRef}
             type="text"
@@ -78,17 +78,17 @@ export const QuickOpenModal: React.FC<QuickOpenModalProps> = ({
               setSelectedIndex(0);
             }}
             onKeyDown={handleKeyDown}
-            className="w-full bg-transparent text-sm text-white placeholder-zinc-500 outline-none font-mono"
+            className="w-full bg-transparent text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-zinc-500 outline-none font-mono"
           />
-          <button onClick={onClose} className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white">
+          <button onClick={onClose} className="p-1 hover:bg-slate-200 dark:hover:bg-zinc-800 rounded text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white">
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Results list */}
-        <div className="max-h-72 overflow-y-auto p-1 divide-y divide-zinc-800/40">
+        <div className="max-h-72 overflow-y-auto p-1 divide-y divide-slate-100 dark:divide-zinc-800/40">
           {filtered.length === 0 ? (
-            <div className="p-4 text-center text-xs text-zinc-500">
+            <div className="p-4 text-center text-xs text-slate-500 dark:text-zinc-500">
               No matching files found
             </div>
           ) : (
@@ -107,25 +107,27 @@ export const QuickOpenModal: React.FC<QuickOpenModalProps> = ({
                   }}
                   onMouseEnter={() => setSelectedIndex(idx)}
                   className={`flex items-center justify-between px-3 py-2 cursor-pointer rounded-lg text-xs transition ${
-                    isSelected ? 'bg-emerald-950/60 text-white' : 'text-zinc-300 hover:bg-zinc-800/50'
+                    isSelected
+                      ? 'bg-emerald-50 dark:bg-emerald-950/60 text-slate-950 dark:text-white'
+                      : 'text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800/50'
                   }`}
                 >
                   <div className="flex items-center gap-2 truncate">
                     {isImg ? (
-                      <ImageIcon className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <ImageIcon className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
                     ) : isVid ? (
-                      <Film className="w-4 h-4 text-blue-400 shrink-0" />
+                      <Film className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
                     ) : isMd ? (
-                      <FileText className="w-4 h-4 text-teal-400 shrink-0" />
+                      <FileText className="w-4 h-4 text-teal-600 dark:text-teal-400 shrink-0" />
                     ) : (
-                      <FileCode className="w-4 h-4 text-blue-400 shrink-0" />
+                      <FileCode className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
                     )}
-                    <span className="font-mono text-zinc-200">{file.name}</span>
-                    <span className="text-zinc-500 font-mono text-[11px] truncate">
+                    <span className="font-mono text-slate-900 dark:text-zinc-200">{file.name}</span>
+                    <span className="text-slate-500 dark:text-zinc-500 font-mono text-[11px] truncate">
                       {file.path}
                     </span>
                   </div>
-                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-emerald-400 shrink-0 ml-2">
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 dark:bg-zinc-800 text-emerald-700 dark:text-emerald-400 shrink-0 ml-2">
                     {file.cloudProvider}
                   </span>
                 </div>
@@ -135,12 +137,12 @@ export const QuickOpenModal: React.FC<QuickOpenModalProps> = ({
         </div>
 
         {/* Modal footer hints */}
-        <div className="px-4 py-2 border-t border-zinc-800/80 bg-zinc-900/50 flex items-center justify-between text-[11px] text-zinc-500">
+        <div className="px-4 py-2 border-t border-slate-200 dark:border-zinc-800/80 bg-slate-50 dark:bg-zinc-900/50 flex items-center justify-between text-[11px] text-slate-500 dark:text-zinc-500">
           <span>
-            Navigate: <kbd className="bg-zinc-800 px-1 rounded text-zinc-400">↑</kbd> <kbd className="bg-zinc-800 px-1 rounded text-zinc-400">↓</kbd>
+            Navigate: <kbd className="bg-slate-200 dark:bg-zinc-800 px-1 rounded text-slate-700 dark:text-zinc-400">↑</kbd> <kbd className="bg-slate-200 dark:bg-zinc-800 px-1 rounded text-slate-700 dark:text-zinc-400">↓</kbd>
           </span>
           <span>
-            Select: <kbd className="bg-zinc-800 px-1 rounded text-zinc-400">Enter</kbd> | Close: <kbd className="bg-zinc-800 px-1 rounded text-zinc-400">Esc</kbd>
+            Select: <kbd className="bg-slate-200 dark:bg-zinc-800 px-1 rounded text-slate-700 dark:text-zinc-400">Enter</kbd> | Close: <kbd className="bg-slate-200 dark:bg-zinc-800 px-1 rounded text-slate-700 dark:text-zinc-400">Esc</kbd>
           </span>
         </div>
       </div>

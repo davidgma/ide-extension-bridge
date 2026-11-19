@@ -170,24 +170,24 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({ file }) => {
   // Video File Rendering
   if (isVideo) {
     return (
-      <div className="h-full w-full flex flex-col bg-[#141416] select-auto">
+      <div className="h-full w-full flex flex-col bg-slate-50 dark:bg-[#141416] select-auto">
         {/* Toolbar */}
-        <div className="flex items-center justify-between px-4 py-2 bg-zinc-900 border-b border-zinc-800 text-xs text-zinc-300">
+        <div className="flex items-center justify-between px-4 py-2 bg-white dark:bg-zinc-900 border-b border-slate-200 dark:border-zinc-800 text-xs text-slate-700 dark:text-zinc-300">
           <div className="flex items-center gap-2">
-            <Film className="w-4 h-4 text-emerald-400" />
-            <span className="font-semibold text-white">{file.name}</span>
-            <span className="px-2 py-0.5 rounded bg-zinc-800 text-[10px] normal-case font-mono text-emerald-400">
+            <Film className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            <span className="font-semibold text-slate-900 dark:text-white">{file.name}</span>
+            <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-zinc-800 text-[10px] normal-case font-mono text-emerald-700 dark:text-emerald-400">
               {ext}
             </span>
           </div>
-          <div className="flex items-center gap-2 text-zinc-400">
-            <span>Provider: <strong className="text-zinc-200">{file.cloudProvider}</strong></span>
+          <div className="flex items-center gap-2 text-slate-500 dark:text-zinc-400">
+            <span>Provider: <strong className="text-slate-900 dark:text-zinc-200">{file.cloudProvider}</strong></span>
           </div>
         </div>
 
         {/* Player Container */}
-        <div className="flex-1 flex items-center justify-center p-6 bg-[#0c0c0e]">
-          <div className="relative max-w-3xl w-full rounded-xl overflow-hidden border border-zinc-800 shadow-2xl bg-black">
+        <div className="flex-1 flex items-center justify-center p-6 bg-slate-100 dark:bg-[#0c0c0e]">
+          <div className="relative max-w-3xl w-full rounded-xl overflow-hidden border border-slate-300 dark:border-zinc-800 shadow-2xl bg-black">
             {file.binaryUrl ? (
               <video
                 ref={videoRef}
@@ -264,17 +264,17 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({ file }) => {
 
   // Image File Rendering
   return (
-    <div className="h-full w-full flex flex-col bg-[#141416] select-auto">
+    <div className="h-full w-full flex flex-col bg-slate-50 dark:bg-[#141416] select-auto">
       {/* Top Toolbar */}
-      <div className="flex items-center justify-between px-4 py-2 bg-zinc-900 border-b border-zinc-800 text-xs text-zinc-300">
+      <div className="flex items-center justify-between px-4 py-2 bg-white dark:bg-zinc-900 border-b border-slate-200 dark:border-zinc-800 text-xs text-slate-700 dark:text-zinc-300">
         <div className="flex items-center gap-2">
-          <ImageIcon className="w-4 h-4 text-emerald-400" />
-          <span className="font-semibold text-white">{file.name}</span>
-          <span className="px-2 py-0.5 rounded bg-zinc-800 text-[10px] font-mono text-emerald-400">
+          <ImageIcon className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+          <span className="font-semibold text-slate-900 dark:text-white">{file.name}</span>
+          <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-zinc-800 text-[10px] font-mono text-emerald-700 dark:text-emerald-400">
             {ext}
           </span>
           {imgDimensions && (
-            <span className="text-zinc-500 font-mono text-[11px]">
+            <span className="text-slate-500 dark:text-zinc-500 font-mono text-[11px]">
               ({imgDimensions.width} × {imgDimensions.height}px)
             </span>
           )}
@@ -286,7 +286,9 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({ file }) => {
             <button
               onClick={() => setShowSvgCode(!showSvgCode)}
               className={`flex items-center gap-1 px-2.5 py-1 rounded transition text-xs ${
-                showSvgCode ? 'bg-emerald-600 text-black font-semibold' : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-200'
+                showSvgCode
+                  ? 'bg-emerald-600 text-white font-semibold'
+                  : 'bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-200'
               }`}
             >
               <Code className="w-3.5 h-3.5" />
@@ -294,42 +296,46 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({ file }) => {
             </button>
           )}
 
-          <div className="h-4 w-px bg-zinc-750 mx-1" />
+          <div className="h-4 w-px bg-slate-300 dark:bg-zinc-700 mx-1" />
 
           <button
             onClick={() => setZoom(z => Math.max(0.2, z - 0.2))}
-            className="p-1.5 hover:bg-zinc-800 rounded text-zinc-300 transition"
+            className="p-1.5 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded text-slate-600 dark:text-zinc-300 transition"
             title="Zoom Out"
           >
             <ZoomOut className="w-4 h-4" />
           </button>
-          <span className="font-mono text-[11px] text-zinc-400 min-w-[45px] text-center">
+          <span className="font-mono text-[11px] text-slate-500 dark:text-zinc-400 min-w-[45px] text-center">
             {Math.round(zoom * 100)}%
           </span>
           <button
             onClick={() => setZoom(z => Math.min(4, z + 0.2))}
-            className="p-1.5 hover:bg-zinc-800 rounded text-zinc-300 transition"
+            className="p-1.5 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded text-slate-600 dark:text-zinc-300 transition"
             title="Zoom In"
           >
             <ZoomIn className="w-4 h-4" />
           </button>
           <button
             onClick={() => setZoom(1)}
-            className="p-1.5 hover:bg-zinc-800 rounded text-zinc-300 transition"
+            className="p-1.5 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded text-slate-600 dark:text-zinc-300 transition"
             title="Reset Zoom"
           >
             <RotateCcw className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => setShowGrid(!showGrid)}
-            className={`p-1.5 rounded transition ${showGrid ? 'bg-zinc-800 text-emerald-400' : 'text-zinc-400 hover:bg-zinc-800'}`}
+            className={`p-1.5 rounded transition ${
+              showGrid
+                ? 'bg-slate-200 dark:bg-zinc-800 text-emerald-600 dark:text-emerald-400'
+                : 'text-slate-500 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800'
+            }`}
             title="Toggle Transparency Checkerboard"
           >
             <Grid className="w-4 h-4" />
           </button>
           <button
             onClick={handleDownload}
-            className="p-1.5 hover:bg-zinc-800 rounded text-zinc-300 transition"
+            className="p-1.5 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded text-slate-600 dark:text-zinc-300 transition"
             title="Download Image"
           >
             <Download className="w-4 h-4" />
@@ -338,19 +344,19 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({ file }) => {
       </div>
 
       {/* Main Image Area or SVG Code */}
-      <div className="flex-1 relative overflow-auto flex items-center justify-center p-8 bg-[#0a0a0c]">
+      <div className="flex-1 relative overflow-auto flex items-center justify-center p-8 bg-slate-100 dark:bg-[#0a0a0c]">
         {showSvgCode ? (
           <div className="w-full h-full p-4 overflow-auto">
-            <pre className="text-xs font-mono text-emerald-300 bg-zinc-950 p-6 rounded-xl border border-zinc-800 leading-relaxed select-text">
+            <pre className="text-xs font-mono text-emerald-700 dark:text-emerald-300 bg-white dark:bg-zinc-950 p-6 rounded-xl border border-slate-200 dark:border-zinc-800 leading-relaxed select-text">
               <code>{file.content}</code>
             </pre>
           </div>
         ) : (
           <div
-            className={`relative rounded-xl border border-zinc-800/80 p-6 transition-all duration-200 flex items-center justify-center shadow-2xl ${
+            className={`relative rounded-xl border border-slate-300 dark:border-zinc-800/80 p-6 transition-all duration-200 flex items-center justify-center shadow-xl ${
               showGrid
-                ? 'bg-[linear-gradient(45deg,#1f1f23_25%,transparent_25%),linear-gradient(-45deg,#1f1f23_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#1f1f23_75%),linear-gradient(-45deg,transparent_75%,#1f1f23_75%)] bg-[size:20px_20px] bg-[#141416]'
-                : 'bg-zinc-900/60'
+                ? 'bg-[linear-gradient(45deg,#e2e8f0_25%,transparent_25%),linear-gradient(-45deg,#e2e8f0_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#e2e8f0_75%),linear-gradient(-45deg,transparent_75%,#e2e8f0_75%)] dark:bg-[linear-gradient(45deg,#1f1f23_25%,transparent_25%),linear-gradient(-45deg,#1f1f23_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#1f1f23_75%),linear-gradient(-45deg,transparent_75%,#1f1f23_75%)] bg-[size:20px_20px] bg-white dark:bg-[#141416]'
+                : 'bg-white dark:bg-zinc-900/60'
             }`}
             style={{
               transform: `scale(${zoom})`,

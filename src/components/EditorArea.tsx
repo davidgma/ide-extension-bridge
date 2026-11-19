@@ -30,6 +30,8 @@ interface EditorAreaProps {
   activeTheme: EditorTheme;
   wordWrap: boolean;
   minimap: boolean;
+  fontSize?: number;
+  tabSize?: number;
   isReadOnly?: boolean;
   onContentChange: (fileId: string, newContent: string) => void;
   onSaveFile: (file: CloudFile) => void;
@@ -47,6 +49,8 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
   activeTheme,
   wordWrap,
   minimap,
+  fontSize = 13.5,
+  tabSize = 2,
   isReadOnly = false,
   onContentChange,
   onSaveFile,
@@ -115,20 +119,20 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
   if (!activeFile) {
     const recentFiles = files.filter(f => !f.isDirectory).slice(0, 6);
     return (
-      <div className="h-full w-full flex flex-col items-center justify-center bg-[#18181b] p-6 text-center select-auto">
+      <div className="h-full w-full flex flex-col items-center justify-center bg-slate-50 dark:bg-[#18181b] p-6 text-center select-auto">
         <div className="max-w-md w-full space-y-6">
-          <div className="mx-auto w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-500 to-blue-600 flex items-center justify-center shadow-2xl shadow-emerald-950/60">
+          <div className="mx-auto w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-500 to-blue-600 flex items-center justify-center shadow-xl shadow-emerald-950/30">
             <Radio className="w-8 h-8 text-white" />
           </div>
 
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-white">
-              FreshFood Rocks <span className="text-emerald-400">Monarch IDE</span>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
+              FreshFood Rocks <span className="text-emerald-600 dark:text-emerald-400">Monarch IDE</span>
             </h1>
-            <p className="text-xs text-zinc-400 mt-2 font-mono">
-              Target Host: <span className="text-emerald-300">https://ide.freshfood.rocks</span>
+            <p className="text-xs text-slate-500 dark:text-zinc-400 mt-2 font-mono">
+              Target Host: <span className="text-emerald-700 dark:text-emerald-300">https://ide.freshfood.rocks</span>
             </p>
-            <p className="text-xs text-zinc-400 mt-1">
+            <p className="text-xs text-slate-500 dark:text-zinc-400 mt-1">
               H2 Cloud Bridge Protocol v1.3 (H2_CLOUD_BRIDGE)
             </p>
           </div>
@@ -136,34 +140,34 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
           <div className="grid grid-cols-2 gap-3 text-left">
             <button
               onClick={onOpenQuickOpen}
-              className="p-3 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-emerald-500/40 hover:bg-zinc-850 transition group"
+              className="p-3 rounded-xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 hover:border-emerald-500/60 hover:bg-slate-100/70 dark:hover:bg-zinc-800/70 transition group shadow-2xs"
             >
-              <div className="flex items-center gap-2 text-zinc-200 group-hover:text-emerald-400 font-semibold text-xs">
-                <Search className="w-4 h-4 text-emerald-400" />
+              <div className="flex items-center gap-2 text-slate-800 dark:text-zinc-200 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 font-semibold text-xs">
+                <Search className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                 <span>Quick Open</span>
               </div>
-              <div className="text-[11px] text-zinc-500 mt-1 font-mono">⌘P / Ctrl+P</div>
+              <div className="text-[11px] text-slate-500 dark:text-zinc-500 mt-1 font-mono">⌘P / Ctrl+P</div>
             </button>
 
             <button
               onClick={onOpenBridgeModal}
-              className="p-3 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-blue-500/40 hover:bg-zinc-850 transition group"
+              className="p-3 rounded-xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 hover:border-blue-500/60 hover:bg-slate-100/70 dark:hover:bg-zinc-800/70 transition group shadow-2xs"
             >
-              <div className="flex items-center gap-2 text-zinc-200 group-hover:text-blue-400 font-semibold text-xs">
-                <Radio className="w-4 h-4 text-blue-400" />
+              <div className="flex items-center gap-2 text-slate-800 dark:text-zinc-200 group-hover:text-blue-600 dark:group-hover:text-blue-400 font-semibold text-xs">
+                <Radio className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                 <span>Bridge Protocol</span>
               </div>
-              <div className="text-[11px] text-zinc-500 mt-1 font-mono font-normal">Inspect v1.3</div>
+              <div className="text-[11px] text-slate-500 dark:text-zinc-500 mt-1 font-mono font-normal">Inspect v1.3</div>
             </button>
           </div>
 
-          <div className="text-left bg-zinc-900/60 border border-zinc-800 rounded-xl p-3">
-            <div className="text-[10px] font-bold text-zinc-500 font-mono tracking-wider mb-2">
+          <div className="text-left bg-white dark:bg-zinc-900/60 border border-slate-200 dark:border-zinc-800 rounded-xl p-3 shadow-2xs">
+            <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-500 font-mono tracking-wider mb-2">
               Workspace Files ({files.filter(f => !f.isDirectory).length})
             </div>
             <div className="space-y-1">
               {recentFiles.length === 0 ? (
-                <div className="text-xs text-zinc-500 py-2 italic">
+                <div className="text-xs text-slate-500 dark:text-zinc-500 py-2 italic">
                   No files loaded yet. Expand a folder in the sidebar or select a connected drive.
                 </div>
               ) : (
@@ -171,13 +175,13 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
                   <div
                     key={file.id}
                     onClick={() => onOpenFile(file.id)}
-                    className="flex items-center justify-between p-2 rounded-lg hover:bg-zinc-800/80 cursor-pointer text-xs transition"
+                    className="flex items-center justify-between p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800/80 cursor-pointer text-xs transition"
                   >
-                    <span className="font-mono text-zinc-300 flex items-center gap-2 truncate">
-                      <FileCode className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span className="font-mono text-slate-700 dark:text-zinc-300 flex items-center gap-2 truncate">
+                      <FileCode className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
                       <span className="truncate">{file.path}</span>
                     </span>
-                    <span className="text-[10px] font-mono text-zinc-500 shrink-0 ml-2">
+                    <span className="text-[10px] font-mono text-slate-500 dark:text-zinc-500 shrink-0 ml-2">
                       {file.cloudProvider}
                     </span>
                   </div>
@@ -193,12 +197,12 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
   // Lazy load state
   if (activeFile.isLoadingContent) {
     return (
-      <div className="h-full w-full flex flex-col items-center justify-center bg-[#18181b] p-6 text-center select-auto">
-        <RotateCw className="w-7 h-7 text-emerald-400 animate-spin mb-3" />
-        <div className="text-sm font-semibold text-white">
+      <div className="h-full w-full flex flex-col items-center justify-center bg-slate-50 dark:bg-[#18181b] p-6 text-center select-auto">
+        <RotateCw className="w-7 h-7 text-emerald-600 dark:text-emerald-400 animate-spin mb-3" />
+        <div className="text-sm font-semibold text-slate-900 dark:text-white">
           Fetching {activeFile.name}...
         </div>
-        <div className="text-xs text-zinc-400 font-mono mt-1">
+        <div className="text-xs text-slate-500 dark:text-zinc-400 font-mono mt-1">
           Sending H2_READ_FILE_REQ ({activeFile.cloudProvider}) for {activeFile.path}
         </div>
       </div>
@@ -208,24 +212,24 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
   // Lazy load error or unloaded state
   if (activeFile.loadError || activeFile.contentLoaded === false) {
     return (
-      <div className="h-full w-full flex flex-col items-center justify-center bg-[#18181b] p-6 text-center select-auto space-y-3">
+      <div className="h-full w-full flex flex-col items-center justify-center bg-slate-50 dark:bg-[#18181b] p-6 text-center select-auto space-y-3">
         {activeFile.loadError ? (
           <>
-            <AlertTriangle className="w-8 h-8 text-red-400" />
-            <div className="text-sm font-semibold text-red-300">
+            <AlertTriangle className="w-8 h-8 text-red-600 dark:text-red-400" />
+            <div className="text-sm font-semibold text-red-700 dark:text-red-300">
               Failed to load {activeFile.name}
             </div>
-            <div className="text-xs text-zinc-400 font-mono max-w-md">
+            <div className="text-xs text-slate-600 dark:text-zinc-400 font-mono max-w-md">
               {activeFile.loadError}
             </div>
           </>
         ) : (
           <>
-            <DownloadCloud className="w-8 h-8 text-blue-400" />
-            <div className="text-sm font-semibold text-white">
+            <DownloadCloud className="w-8 h-8 text-blue-600 dark:text-blue-400" />
+            <div className="text-sm font-semibold text-slate-900 dark:text-white">
               {activeFile.name} (Metadata Loaded)
             </div>
-            <div className="text-xs text-zinc-400 font-mono max-w-md">
+            <div className="text-xs text-slate-500 dark:text-zinc-400 font-mono max-w-md">
               Content is fetched lazily over H2_READ_FILE_REQ when requested.
             </div>
           </>
@@ -255,17 +259,17 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
   const language = getMonacoLanguage(activeFile.name);
 
   return (
-    <div className="h-full w-full flex flex-col overflow-hidden bg-[#18181b]">
+    <div className="h-full w-full flex flex-col overflow-hidden bg-white dark:bg-[#18181b]">
       {isReadOnly && (
-        <div className="px-3 py-1 bg-red-950/60 border-b border-red-500/30 text-red-200 text-[11px] flex items-center gap-2 shrink-0">
-          <Lock className="w-3 h-3 text-red-400" />
+        <div className="px-3 py-1 bg-red-50 dark:bg-red-950/60 border-b border-red-200 dark:border-red-500/30 text-red-800 dark:text-red-200 text-[11px] flex items-center gap-2 shrink-0">
+          <Lock className="w-3 h-3 text-red-600 dark:text-red-400" />
           <span>Read-only session active — editing and saving are disabled by the extension.</span>
         </div>
       )}
 
       <div className="flex-1 min-h-0 flex overflow-hidden">
         {/* Code Editor */}
-        <div className={`h-full ${isMd && previewMode === 'split' ? 'w-1/2 border-r border-zinc-800' : 'w-full'}`}>
+        <div className={`h-full ${isMd && previewMode === 'split' ? 'w-1/2 border-r border-slate-200 dark:border-zinc-800' : 'w-full'}`}>
           <Editor
             height="100%"
             language={language}
@@ -279,10 +283,10 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
             }}
             options={{
               readOnly: isReadOnly,
-              fontSize: 13.5,
+              fontSize,
               fontFamily: "'Fira Code', 'Consolas', 'Monaco', monospace",
               fontLigatures: true,
-              tabSize: 2,
+              tabSize,
               minimap: { enabled: minimap },
               wordWrap: wordWrap ? 'on' : 'off',
               automaticLayout: true,
@@ -302,7 +306,7 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
 
         {/* Markdown Live Preview on right (Split mode) */}
         {isMd && previewMode === 'split' && (
-          <div className="h-full w-1/2 overflow-hidden bg-[#141416]">
+          <div className="h-full w-1/2 overflow-hidden bg-slate-50 dark:bg-[#141416]">
             <MarkdownViewer content={activeFile.content} filename={activeFile.name} />
           </div>
         )}

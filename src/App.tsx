@@ -19,7 +19,9 @@ import { INITIAL_CLOUD_FILES, inferMimeType } from './utils/fileSystem';
 import { H2SaveFileRes, H2DeleteFileRes } from './utils/h2BridgeClient';
 import { useExtensionBridge } from './hooks/useExtensionBridge';
 import { useDynamicFavicon } from './hooks/useDynamicFavicon';
+import { useIdeSettings } from './hooks/useIdeSettings';
 import { executeCode, RunResult } from './utils/codeRunner';
+import { MenuBar } from './components/MenuBar';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { TabsBar } from './components/TabsBar';
@@ -47,11 +49,19 @@ export default function App() {
   ]);
   const [activeTabId, setActiveTabId] = useState<string | null>('file-readme');
 
-  // State: Editor preferences
-  const [activeTheme, setActiveTheme] = useState<EditorTheme>('freshfood-dark');
-  const [wordWrap, setWordWrap] = useState(true);
-  const [minimap, setMinimap] = useState(true);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  // State: Persisted IDE preferences & Light/Dark theme (stored in localStorage)
+  const {
+    settings,
+    setColorMode,
+    toggleColorMode,
+    setEditorTheme,
+    updateSettings,
+    resetSettings,
+  } = useIdeSettings();
+  const activeTheme = settings.editorTheme;
+  const wordWrap = settings.wordWrap;
+  const minimap = settings.minimap;
+  const isSidebarOpen = settings.sidebarOpen;
 
   // State: Cursor telemetry
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
@@ -833,16 +843,40 @@ export default function App() {
 
       if (isCmdOrCtrl && e.key.toLowerCase() === 'b') {
         e.preventDefault();
-        setIsSidebarOpen(prev => !prev);
+        updateSettings({ sidebarOpen: !isSidebarOpen });
       }
     };
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [handleSaveCurrent]);
+  }, [handleSaveCurrent, updateSettings, isSidebarOpen]);
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-[#18181b] text-zinc-200 select-auto overflow-hidden">
+    <div className="h-screen w-screen flex flex-col bg-slate-50 dark:bg-[#18181b] text-slate-900 dark:text-zinc-200 select-auto overflow-hidden">
+      {/* Minimal Always-Visible Main Menu Bar (expanded in Step 4) */}
+      <MenuBar
+        colorMode={settings.colorMode}
+        onSetColorMode={mode => {
+          setColorMode(mode);
+          notify(`Switched to ${mode === 'light' ? 'Light' : 'Dark'} mode`);
+        }}
+        onToggleColorMode={() => {
+          const next = settings.colorMode === 'dark' ? 'Light' : 'Dark';
+          toggleColorMode();
+          notify(`Switched to ${next} mode`);
+        }}
+        onOpenExportPreferences={() =>
+          notify('Preferences Export to JSON modal will be added in Sub-step 1b')
+        }
+        onOpenImportPreferences={() =>
+          notify('Preferences Import from JSON modal will be added in Sub-step 1b')
+        }
+        onResetPreferences={() => {
+          resetSettings();
+          notify('Preferences reset to defaults');
+        }}
+      />
+
       {/* Top Header */}
       <Header
         activeFile={activeFile}
@@ -859,9 +893,9 @@ export default function App() {
         lineCount={lineCount}
         charCount={charCount}
         isRunningCode={isRunningCode}
-        onThemeChange={setActiveTheme}
-        onToggleWordWrap={() => setWordWrap(!wordWrap)}
-        onToggleMinimap={() => setMinimap(!minimap)}
+        onThemeChange={setEditorTheme}
+        onToggleWordWrap={() => updateSettings({ wordWrap: !wordWrap })}
+        onToggleMinimap={() => updateSettings({ minimap: !minimap })}
         onSaveCurrent={handleSaveCurrent}
         onSaveAll={handleSaveAll}
         onStartBridge={() => startBridge()}
@@ -875,9 +909,9 @@ export default function App() {
 
       {/* Graceful Connection Refusal Notice */}
       {connectionError && extensionStatus !== 'connected' && (
-        <div className="px-4 py-1.5 bg-red-950/70 border-b border-red-500/40 text-red-100 text-xs flex items-center justify-between gap-3 shrink-0">
+        <div className="px-4 py-1.5 bg-red-50 dark:bg-red-950/70 border-b border-red-200 dark:border-red-500/40 text-red-900 dark:text-red-100 text-xs flex items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+            <AlertTriangle className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0" />
             <span>
               <strong>H2 Bridge Notice{connectionReasonCode ? ` (${connectionReasonCode})` : ''}:</strong>{' '}
               {connectionError}
@@ -892,7 +926,7 @@ export default function App() {
             </button>
             <button
               onClick={dismissConnectionError}
-              className="p-0.5 hover:bg-red-900/60 rounded text-red-300"
+              className="p-0.5 hover:bg-red-100 dark:hover:bg-red-900/60 rounded text-red-700 dark:text-red-300"
               title="Dismiss notice"
             >
               <X className="w-3.5 h-3.5" />
@@ -935,7 +969,7 @@ export default function App() {
         )}
 
         {/* Center Editor Container */}
-        <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-[#18181b]">
+        <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-white dark:bg-[#18181b]">
           <TabsBar
             openTabs={openTabs}
             activeTabId={activeTabId}
@@ -955,6 +989,8 @@ export default function App() {
                 activeTheme={activeTheme}
                 wordWrap={wordWrap}
                 minimap={minimap}
+                fontSize={settings.fontSize}
+                tabSize={settings.tabSize}
                 isReadOnly={isReadOnly}
                 onContentChange={handleContentChange}
                 onSaveFile={saveCloudFile}
@@ -1000,6 +1036,7 @@ export default function App() {
         activeFile={activeFile}
         cursorPos={cursorPos}
         selectionLength={selectionLength}
+        tabSize={settings.tabSize}
         extensionStatus={extensionStatus}
         handshakeInfo={handshakeInfo}
         isSaving={isSaving}

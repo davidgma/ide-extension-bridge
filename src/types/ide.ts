@@ -173,3 +173,47 @@ export interface BridgeMessage {
 }
 
 export type EditorTheme = 'freshfood-dark' | 'freshfood-cyber' | 'freshfood-light' | 'vs-dark' | 'vs' | 'hc-black';
+
+export type UiColorMode = 'light' | 'dark';
+
+/**
+ * Persisted IDE user preferences stored in localStorage and exported/imported via JSON.
+ * Strictly separate from Clockie H2 bridge sessionId (which stays in per-tab sessionStorage).
+ */
+export interface IdeSettings {
+  /** Whole-IDE shell color mode ('light' | 'dark') */
+  colorMode: UiColorMode;
+  /** Active Monaco Editor syntax/color theme */
+  editorTheme: EditorTheme;
+  /** Remembered Monaco theme for Dark mode */
+  lastDarkEditorTheme: EditorTheme;
+  /** Remembered Monaco theme for Light mode */
+  lastLightEditorTheme: EditorTheme;
+  /** Editor font size in pixels */
+  fontSize: number;
+  /** Spaces per indentation tab */
+  tabSize: number;
+  /** Wrap long lines in Monaco */
+  wordWrap: boolean;
+  /** Show code minimap in Monaco */
+  minimap: boolean;
+  /** Primary sidebar width in pixels */
+  sidebarWidth: number;
+  /** Whether the primary sidebar is visible */
+  sidebarOpen: boolean;
+  /** Preferred cloud provider for exporting preferences JSON (e.g. "pcloud") */
+  preferencesExportProvider: string;
+  /** Preferred cloud folder path for exporting preferences JSON (e.g. "2026/downloads") */
+  preferencesExportFolder: string;
+  /** Preferred filename for exporting preferences JSON */
+  preferencesExportFilename: string;
+  /** When true, the default export filename updates to today's date automatically */
+  preferencesUseAutoDateFilename: boolean;
+  /** Most recent cloud provider used when importing preferences JSON */
+  preferencesLastImportProvider: string;
+  /** Most recent cloud folder path used when importing preferences JSON */
+  preferencesLastImportFolder: string;
+  /** Most recent filename used when importing preferences JSON */
+  preferencesLastImportFile: string;
+}
+
