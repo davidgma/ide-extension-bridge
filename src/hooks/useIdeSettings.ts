@@ -11,7 +11,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { EditorTheme, IdeSettings, UiColorMode } from '../types/ide';
+import { DirectStartupDriveMode, EditorTheme, IdeSettings, UiColorMode } from '../types/ide';
 
 export const IDE_SETTINGS_STORAGE_KEY = 'monarch_ide_preferences_v1' as const;
 
@@ -64,6 +64,9 @@ export function createDefaultIdeSettings(date = new Date()): IdeSettings {
     preferencesLastImportProvider: '',
     preferencesLastImportFolder: '',
     preferencesLastImportFile: '',
+    directStartupDriveMode: 'all',
+    directStartupDrive: '',
+    knownBridgeDrives: [],
   };
 }
 
@@ -165,6 +168,21 @@ export function normalizeIdeSettings(raw: unknown): IdeSettings {
       typeof input.preferencesLastImportFile === 'string'
         ? input.preferencesLastImportFile.trim()
         : '',
+    directStartupDriveMode:
+      input.directStartupDriveMode === 'single' || input.directStartupDriveMode === 'none'
+        ? (input.directStartupDriveMode as DirectStartupDriveMode)
+        : 'all',
+    directStartupDrive:
+      typeof input.directStartupDrive === 'string' ? input.directStartupDrive.trim() : '',
+    knownBridgeDrives: Array.isArray(input.knownBridgeDrives)
+      ? Array.from(
+          new Set(
+            input.knownBridgeDrives
+              .filter((d): d is string => typeof d === 'string' && d.trim().length > 0)
+              .map(d => d.trim())
+          )
+        )
+      : [],
   };
 }
 

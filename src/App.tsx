@@ -88,6 +88,11 @@ export default function App() {
   const [statusNotification, setStatusNotification] = useState<string | null>(null);
 
   const readCloudFileRef = useRef<((file: CloudFile) => Promise<void>) | null>(null);
+  const knownBridgeDrivesRef = useRef<string[]>(settings.knownBridgeDrives);
+
+  useEffect(() => {
+    knownBridgeDrivesRef.current = settings.knownBridgeDrives;
+  }, [settings.knownBridgeDrives]);
 
   // Status toast helper
   const notify = useCallback((msg: string) => {
@@ -96,6 +101,21 @@ export default function App() {
       setStatusNotification(current => (current === msg ? null : current));
     }, 3500);
   }, []);
+
+  // Merge newly discovered drive keys from Clockie H2 into localStorage cache without redundant writes
+  const handleDrivesDiscovered = useCallback(
+    (driveKeys: string[]) => {
+      const cleaned = driveKeys.map(k => k.trim()).filter(k => Boolean(k) && k !== 'all');
+      if (cleaned.length === 0) return;
+      const existing = knownBridgeDrivesRef.current;
+      const merged = Array.from(new Set([...existing, ...cleaned]));
+      if (merged.length !== existing.length) {
+        knownBridgeDrivesRef.current = merged;
+        updateSettings({ knownBridgeDrives: merged });
+      }
+    },
+    [updateSettings]
+  );
 
   // Clockie H2 Bridge Protocol v1.3 (H2_CLOUD_BRIDGE) hook
   const {
@@ -121,6 +141,10 @@ export default function App() {
     dismissConnectionError,
     clearLogs,
   } = useExtensionBridge({
+    directStartupDriveMode: settings.directStartupDriveMode,
+    directStartupDrive: settings.directStartupDrive,
+    onDrivesDiscovered: handleDrivesDiscovered,
+    onStartupSkippedNotice: notify,
     onWorkspaceTreeLoaded: (incomingItems, provider, rootName, primaryRelativePath) => {
       const primaryFile = primaryRelativePath
         ? incomingItems.find(item => !item.isDirectory && item.path === primaryRelativePath)
@@ -1342,6 +1366,7 @@ export default function App() {
                 fontSize={settings.fontSize}
                 tabSize={settings.tabSize}
                 isReadOnly={isReadOnly}
+                isBridgeConnected={extensionStatus === 'connected'}
                 isConnectingBridge={extensionStatus === 'connecting'}
                 bridgeStatusView={
                   <ExtensionBridgeStatusPage
@@ -1374,6 +1399,7 @@ export default function App() {
                   <PreferencesPage
                     settings={settings}
                     isBridgeConnected={extensionStatus === 'connected'}
+                    drives={handshakeInfo?.drives}
                     onSetColorMode={mode => {
                       setColorMode(mode);
                       notify(`Switched to ${mode === 'light' ? 'Light' : 'Dark'} mode`);

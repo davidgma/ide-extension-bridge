@@ -183,6 +183,8 @@ export type EditorTheme = 'freshfood-dark' | 'freshfood-cyber' | 'freshfood-ligh
 
 export type UiColorMode = 'light' | 'dark';
 
+export type DirectStartupDriveMode = 'all' | 'single' | 'none';
+
 /**
  * Persisted IDE user preferences stored in localStorage and exported/imported via JSON.
  * Strictly separate from Clockie H2 bridge sessionId (which stays in per-tab sessionStorage).
@@ -224,5 +226,11 @@ export interface IdeSettings {
   preferencesLastImportFolder: string;
   /** Most recent filename used when importing preferences JSON */
   preferencesLastImportFile: string;
+  /** Which drives to load on direct startup ('all' | 'single' | 'none') */
+  directStartupDriveMode: DirectStartupDriveMode;
+  /** Selected drive key when directStartupDriveMode is 'single' */
+  directStartupDrive: string;
+  /** Locally cached list of drive keys discovered from Clockie H2 for offline preferences UI */
+  knownBridgeDrives: string[];
 }
 

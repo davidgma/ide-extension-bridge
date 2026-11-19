@@ -35,6 +35,7 @@ interface EditorAreaProps {
   tabSize?: number;
   isReadOnly?: boolean;
   isConnectingBridge?: boolean;
+  isBridgeConnected?: boolean;
   bridgeStatusView?: React.ReactNode;
   bridgeDebuggerView?: React.ReactNode;
   preferencesView?: React.ReactNode;
@@ -60,6 +61,7 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
   tabSize = 2,
   isReadOnly = false,
   isConnectingBridge = false,
+  isBridgeConnected = false,
   bridgeStatusView,
   bridgeDebuggerView,
   preferencesView,
@@ -214,9 +216,11 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
                   <div className="italic">
                     {isConnectingBridge
                       ? 'Connecting to Clockie H2 extension bridge...'
+                      : isBridgeConnected
+                      ? 'Bridge connected. Select a drive in the sidebar to load its files.'
                       : 'No workspace files loaded yet. Open Bridge → Status or select a connected drive.'}
                   </div>
-                  {!isConnectingBridge && onLoadSampleWorkspace && (
+                  {!isConnectingBridge && !isBridgeConnected && onLoadSampleWorkspace && (
                     <button
                       type="button"
                       onClick={onLoadSampleWorkspace}

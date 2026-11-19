@@ -375,6 +375,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity">
                       {canCreateFiles && (
                         <button
+                          type="button"
                           onClick={e => {
                             e.stopPropagation();
                             setShowNewFileInput(true);
@@ -385,6 +386,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           title={`New file inside ${node.path}`}
                         >
                           <Plus className="w-3 h-3" />
+                        </button>
+                      )}
+                      {canCreateFolders && (
+                        <button
+                          type="button"
+                          onClick={e => {
+                            e.stopPropagation();
+                            setShowNewFolderInput(true);
+                            setShowNewFileInput(false);
+                            setNewPathInput(`${node.path}/`);
+                          }}
+                          className="p-1 hover:text-blue-600 dark:hover:text-blue-400 rounded hover:bg-slate-200 dark:hover:bg-zinc-700/60"
+                          title={`New subfolder inside ${node.path}`}
+                        >
+                          <FolderPlus className="w-3 h-3" />
                         </button>
                       )}
                       {canDeleteFolders && (

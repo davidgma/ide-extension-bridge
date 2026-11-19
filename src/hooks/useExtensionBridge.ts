@@ -25,6 +25,7 @@ import {
   BridgeMessage,
   DispatchTargetInfo,
   H2DriveStatus,
+  DirectStartupDriveMode,
 } from '../types/ide';
 import {
   H2_PROTOCOL,
@@ -57,6 +58,10 @@ interface UseExtensionBridgeProps {
   onFileSaveError?: (localId: string, error: string) => void;
   onItemDeleted?: (itemType: 'file' | 'folder', relativePath: string, res: H2DeleteFileRes) => void;
   onItemDeleteError?: (relativePath: string, error: string) => void;
+  directStartupDriveMode?: DirectStartupDriveMode;
+  directStartupDrive?: string;
+  onDrivesDiscovered?: (driveKeys: string[]) => void;
+  onStartupSkippedNotice?: (message: string) => void;
 }
 
 /** Converts H2_WORKSPACE_TREE / H2_LIST_FOLDER_RES items into Monarch IDE CloudFile records */
@@ -155,6 +160,10 @@ export function useExtensionBridge({
   onFileSaveError,
   onItemDeleted,
   onItemDeleteError,
+  directStartupDriveMode = 'all',
+  directStartupDrive = '',
+  onDrivesDiscovered,
+  onStartupSkippedNotice,
 }: UseExtensionBridgeProps = {}) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [extensionStatus, setExtensionStatus] = useState<ExtensionStatus>('disconnected');
@@ -184,6 +193,10 @@ export function useExtensionBridge({
   const onFileSaveErrorRef = useRef(onFileSaveError);
   const onItemDeletedRef = useRef(onItemDeleted);
   const onItemDeleteErrorRef = useRef(onItemDeleteError);
+  const directStartupDriveModeRef = useRef<DirectStartupDriveMode>(directStartupDriveMode);
+  const directStartupDriveRef = useRef<string>(directStartupDrive);
+  const onDrivesDiscoveredRef = useRef(onDrivesDiscovered);
+  const onStartupSkippedNoticeRef = useRef(onStartupSkippedNotice);
 
   useEffect(() => {
     onWorkspaceTreeLoadedRef.current = onWorkspaceTreeLoaded;
@@ -220,6 +233,22 @@ export function useExtensionBridge({
   useEffect(() => {
     onItemDeleteErrorRef.current = onItemDeleteError;
   }, [onItemDeleteError]);
+
+  useEffect(() => {
+    directStartupDriveModeRef.current = directStartupDriveMode;
+  }, [directStartupDriveMode]);
+
+  useEffect(() => {
+    directStartupDriveRef.current = directStartupDrive;
+  }, [directStartupDrive]);
+
+  useEffect(() => {
+    onDrivesDiscoveredRef.current = onDrivesDiscovered;
+  }, [onDrivesDiscovered]);
+
+  useEffect(() => {
+    onStartupSkippedNoticeRef.current = onStartupSkippedNotice;
+  }, [onStartupSkippedNotice]);
 
   const getDispatchInfo = useCallback((activeSid: string | null): DispatchTargetInfo => {
     const origin =
@@ -355,6 +384,7 @@ export function useExtensionBridge({
         }
         if (Object.keys(candidate).length > 0) {
           driveStatuses = candidate;
+          onDrivesDiscoveredRef.current?.(Object.keys(candidate));
         }
       }
 
@@ -540,11 +570,41 @@ export function useExtensionBridge({
         const latencyMs = Math.round(performance.now() - startTs);
 
         if (res.success && res.sessionId) {
+          if (res.drives && typeof res.drives === 'object') {
+            const discoveredKeys = Object.keys(res.drives);
+            if (discoveredKeys.length > 0) {
+              onDrivesDiscoveredRef.current?.(discoveredKeys);
+            }
+          }
+
           const scope = res.launchedScope || null;
+          const isDirectMode = res.sessionMode === 'direct' && !scope;
+          const startupMode = directStartupDriveModeRef.current;
+          const chosenDrive = directStartupDriveRef.current.trim();
+
           const effectiveProvider = scope?.provider || res.provider || 'all';
           const effectiveRootName = scope?.rootName || res.rootName || 'Cloud Workspace';
           const effectiveItemType = scope?.launchedItemType || res.launchedItemType || 'folder';
           const effectivePrimaryPath = scope?.primaryRelativePath ?? res.primaryRelativePath ?? '';
+
+          const canLoadSingleDrive =
+            Boolean(chosenDrive) &&
+            chosenDrive !== 'all' &&
+            (res.drives ? Boolean(res.drives[chosenDrive]?.connected) : true);
+
+          const initialProvider =
+            isDirectMode && startupMode === 'single' && canLoadSingleDrive
+              ? chosenDrive
+              : effectiveProvider;
+          const initialRootName =
+            isDirectMode && startupMode === 'none'
+              ? 'Select a Cloud Drive'
+              : isDirectMode && startupMode === 'single'
+                ? canLoadSingleDrive
+                  ? `${chosenDrive} Root`
+                  : 'Select a Cloud Drive'
+                : effectiveRootName;
+          const initialDriveRootActive = isDirectMode && startupMode === 'single' && canLoadSingleDrive;
 
           setExtensionStatus('connected');
           setSessionId(res.sessionId);
@@ -554,28 +614,56 @@ export function useExtensionBridge({
             sessionId: res.sessionId,
             sessionMode: res.sessionMode,
             accessMode: res.accessMode || 'readwrite',
-            provider: effectiveProvider,
-            rootName: effectiveRootName,
+            provider: initialProvider,
+            rootName: initialRootName,
             rootFolderId: scope?.rootFolderId,
             launchedItemType: effectiveItemType,
             primaryRelativePath: effectivePrimaryPath,
             launchedScope: scope,
-            driveRootActive: false,
+            driveRootActive: initialDriveRootActive,
             drives: res.drives,
             capabilities: res.capabilities,
             connectedAt: new Date().toLocaleTimeString(),
             latencyMs,
           });
 
-          // Fetch workspace tree on demand (launchedScope in launched mode, or top-level in direct mode)
-          await requestWorkspaceTree({
-            provider: effectiveProvider,
-            driveRoot: false,
-            maxDepth: 2,
-            primaryRelativePathOverride: effectivePrimaryPath,
-            launchedItemTypeOverride: effectiveItemType,
-            fallbackRootName: effectiveRootName,
-          });
+          if (!isDirectMode || startupMode === 'all') {
+            // Launched mode always honors Clockie H2 scope; direct 'all' mode loads all connected drives
+            await requestWorkspaceTree({
+              provider: effectiveProvider,
+              driveRoot: false,
+              maxDepth: 2,
+              primaryRelativePathOverride: effectivePrimaryPath,
+              launchedItemTypeOverride: effectiveItemType,
+              fallbackRootName: effectiveRootName,
+            });
+          } else if (startupMode === 'single' && canLoadSingleDrive) {
+            await requestWorkspaceTree({
+              provider: chosenDrive,
+              driveRoot: true,
+              maxDepth: 2,
+              primaryRelativePathOverride: effectivePrimaryPath,
+              launchedItemTypeOverride: effectiveItemType,
+              fallbackRootName: `${chosenDrive} Root`,
+            });
+          } else {
+            const skipNotice =
+              startupMode === 'none'
+                ? 'Bridge connected — select a drive in Explorer to load files.'
+                : chosenDrive
+                  ? `Preferred startup drive "${chosenDrive}" is not connected — select a drive in Explorer.`
+                  : 'No startup drive selected — choose a drive in Explorer to load files.';
+
+            logMessageRef.current(
+              'event',
+              'H2_SYSTEM_EVENT',
+              { message: skipNotice, directStartupDriveMode: startupMode, chosenDrive },
+              'sent',
+              undefined,
+              res.sessionId
+            );
+            onStartupSkippedNoticeRef.current?.(skipNotice);
+          }
         } else {
           setExtensionStatus('disconnected');
           setSessionId(null);

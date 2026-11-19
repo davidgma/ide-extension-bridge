@@ -27,12 +27,20 @@ import {
   Check,
   X,
   HardDrive,
+  Cloud,
 } from 'lucide-react';
-import { EditorTheme, IdeSettings, UiColorMode } from '../types/ide';
+import {
+  DirectStartupDriveMode,
+  EditorTheme,
+  H2DriveStatus,
+  IdeSettings,
+  UiColorMode,
+} from '../types/ide';
 
 interface PreferencesPageProps {
   settings: IdeSettings;
   isBridgeConnected: boolean;
+  drives?: Record<string, H2DriveStatus>;
   onSetColorMode: (mode: UiColorMode) => void;
   onSetEditorTheme: (theme: EditorTheme) => void;
   onUpdateSettings: (patch: Partial<IdeSettings>) => void;
@@ -89,6 +97,7 @@ const EDITOR_THEMES: Array<{
 export const PreferencesPage: React.FC<PreferencesPageProps> = ({
   settings,
   isBridgeConnected,
+  drives,
   onSetColorMode,
   onSetEditorTheme,
   onUpdateSettings,
@@ -98,6 +107,30 @@ export const PreferencesPage: React.FC<PreferencesPageProps> = ({
   onClose,
 }) => {
   const [confirmingReset, setConfirmingReset] = useState(false);
+
+  const availableDriveKeys = React.useMemo(() => {
+    const merged = [
+      ...Object.keys(drives || {}),
+      ...(settings.knownBridgeDrives || []),
+      ...(settings.directStartupDrive ? [settings.directStartupDrive] : []),
+    ]
+      .map(d => d.trim())
+      .filter(d => Boolean(d) && d !== 'all');
+    return Array.from(new Set(merged));
+  }, [drives, settings.knownBridgeDrives, settings.directStartupDrive]);
+
+  const handleSelectStartupMode = (mode: DirectStartupDriveMode) => {
+    if (mode === 'single' && !settings.directStartupDrive && availableDriveKeys.length > 0) {
+      const firstConnected =
+        availableDriveKeys.find(key => drives?.[key]?.connected) || availableDriveKeys[0];
+      onUpdateSettings({
+        directStartupDriveMode: mode,
+        directStartupDrive: firstConnected,
+      });
+      return;
+    }
+    onUpdateSettings({ directStartupDriveMode: mode });
+  };
 
   return (
     <div className="h-full w-full flex flex-col bg-slate-50 dark:bg-[#18181b] text-slate-900 dark:text-zinc-200 select-auto overflow-hidden">
@@ -444,7 +477,174 @@ export const PreferencesPage: React.FC<PreferencesPageProps> = ({
             </div>
           </section>
 
-          {/* Section 3: JSON Export, Import & Reset */}
+          {/* Section 3: Cloud Startup & Drives */}
+          <section className="rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-[#1e1e22] overflow-hidden shadow-2xs">
+            <div className="px-5 py-3 border-b border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/60 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Cloud className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                <h2 className="text-xs font-semibold text-slate-900 dark:text-white">
+                  Cloud Startup &amp; Drives
+                </h2>
+              </div>
+              <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-500/30">
+                Direct Startup Only
+              </span>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div>
+                <div className="text-xs font-semibold text-slate-900 dark:text-zinc-100">
+                  Direct Startup Drive Loading
+                </div>
+                <div className="text-[11.5px] text-slate-500 dark:text-zinc-400 mt-0.5 leading-relaxed">
+                  Choose which cloud drives to load when opening Monarch IDE directly. Sessions launched from
+                  Clockie H2 always override this setting and load the scope selected in the extension.
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => handleSelectStartupMode('all')}
+                  className={`p-3 rounded-lg border text-left transition ${
+                    settings.directStartupDriveMode === 'all'
+                      ? 'border-blue-500 bg-blue-50/70 dark:bg-blue-950/40 ring-1 ring-blue-500/40'
+                      : 'border-slate-200 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-900/50 hover:border-slate-300 dark:hover:border-zinc-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-slate-900 dark:text-zinc-100">
+                      Load All Drives
+                    </span>
+                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-400 flex items-center gap-1">
+                      Default
+                      {settings.directStartupDriveMode === 'all' && (
+                        <Check className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                      )}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-zinc-400 mt-1.5 leading-relaxed">
+                    Load all connected cloud drives automatically when the bridge connects.
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleSelectStartupMode('single')}
+                  className={`p-3 rounded-lg border text-left transition ${
+                    settings.directStartupDriveMode === 'single'
+                      ? 'border-emerald-500 bg-emerald-50/70 dark:bg-emerald-950/35 ring-1 ring-emerald-500/40'
+                      : 'border-slate-200 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-900/50 hover:border-slate-300 dark:hover:border-zinc-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-slate-900 dark:text-zinc-100">
+                      Load One Drive
+                    </span>
+                    {settings.directStartupDriveMode === 'single' && (
+                      <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-zinc-400 mt-1.5 leading-relaxed">
+                    Load only your selected cloud drive on startup for faster initial loading.
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleSelectStartupMode('none')}
+                  className={`p-3 rounded-lg border text-left transition ${
+                    settings.directStartupDriveMode === 'none'
+                      ? 'border-blue-500 bg-blue-50/70 dark:bg-blue-950/40 ring-1 ring-blue-500/40'
+                      : 'border-slate-200 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-900/50 hover:border-slate-300 dark:hover:border-zinc-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-slate-900 dark:text-zinc-100">
+                      Load Nothing
+                    </span>
+                    {settings.directStartupDriveMode === 'none' && (
+                      <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-zinc-400 mt-1.5 leading-relaxed">
+                    Connect to the bridge and wait until you click a drive in the Explorer sidebar.
+                  </p>
+                </button>
+              </div>
+
+              {settings.directStartupDriveMode === 'single' && (
+                <div className="p-3.5 rounded-lg border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/50 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-slate-900 dark:text-zinc-100">
+                      Startup Drive Selection
+                    </span>
+                    <span className="text-[11px] font-mono text-slate-500 dark:text-zinc-400">
+                      {settings.directStartupDrive
+                        ? `Selected: ${settings.directStartupDrive}`
+                        : 'No drive selected'}
+                    </span>
+                  </div>
+
+                  {availableDriveKeys.length === 0 ? (
+                    <div className="text-[11.5px] text-slate-600 dark:text-zinc-400 py-1">
+                      No drives have been discovered yet. Connect to Clockie H2 once so available drives are
+                      detected and cached locally here.
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {availableDriveKeys.map(driveKey => {
+                        const isSelected = settings.directStartupDrive === driveKey;
+                        const liveStatus = drives?.[driveKey];
+                        const statusLabel = liveStatus
+                          ? liveStatus.connected
+                            ? 'Connected'
+                            : 'Disconnected'
+                          : 'Cached';
+
+                        return (
+                          <button
+                            key={driveKey}
+                            type="button"
+                            onClick={() => onUpdateSettings({ directStartupDrive: driveKey })}
+                            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs transition ${
+                              isSelected
+                                ? 'bg-emerald-600 text-white border-emerald-500 font-semibold shadow-xs'
+                                : 'bg-white dark:bg-zinc-900 text-slate-800 dark:text-zinc-200 border-slate-300 dark:border-zinc-700 hover:border-emerald-500/50'
+                            }`}
+                          >
+                            <span
+                              className={`w-2 h-2 rounded-full shrink-0 ${
+                                isSelected
+                                  ? 'bg-white'
+                                  : liveStatus
+                                    ? liveStatus.connected
+                                      ? 'bg-emerald-500'
+                                      : 'bg-red-500'
+                                    : 'bg-blue-500'
+                              }`}
+                            />
+                            <span className="font-mono">{driveKey}</span>
+                            <span
+                              className={`text-[10px] px-1.5 py-0.2 rounded ${
+                                isSelected
+                                  ? 'bg-emerald-700/70 text-emerald-50'
+                                  : 'bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400'
+                              }`}
+                            >
+                              {statusLabel}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </section>
+
+          {/* Section 4: JSON Export, Import & Reset */}
           <section className="rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-[#1e1e22] overflow-hidden shadow-2xs">
             <div className="px-5 py-3 border-b border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/60 flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
