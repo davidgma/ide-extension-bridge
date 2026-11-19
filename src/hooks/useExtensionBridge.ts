@@ -929,6 +929,122 @@ export function useExtensionBridge({
     [handshakeInfo]
   );
 
+  /**
+   * Isolated Type 2b/2c folder listing for Preferences Export/Import modals.
+   * Uses driveRoot: true directly against H2BridgeClient without mutating workspace tree state.
+   */
+  const listDriveEntries = useCallback(
+    async ({
+      provider,
+      basePath = '',
+      baseFolderId,
+      maxDepth = 1,
+    }: {
+      provider: CloudProvider;
+      basePath?: string;
+      baseFolderId?: string;
+      maxDepth?: number;
+    }) => {
+      const client = clientRef.current;
+      if (!client || !client.sessionId) {
+        throw new H2BridgeError('Extension bridge is not connected', 'NOT_CONNECTED');
+      }
+
+      const cleanBasePath = basePath.replace(/^\/+|\/+$/g, '');
+      const res = await client.listFolder({
+        provider,
+        driveRoot: true,
+        basePath: cleanBasePath || undefined,
+        baseFolderId,
+        maxDepth,
+      });
+
+      const folders = [...(res.folders || [])];
+      const filesList = [...(res.files || [])];
+
+      // Support responses that group entries under res.drives[provider]
+      if (res.drives && typeof res.drives === 'object') {
+        const driveBucket = res.drives[provider];
+        if (driveBucket && typeof driveBucket === 'object') {
+          if (Array.isArray(driveBucket.folders)) folders.push(...driveBucket.folders);
+          if (Array.isArray(driveBucket.files)) filesList.push(...driveBucket.files);
+        }
+      }
+
+      return {
+        provider: res.provider || provider,
+        basePath: res.basePath ?? cleanBasePath,
+        rootName: res.rootName,
+        folders,
+        files: filesList,
+        drives: res.drives,
+      };
+    },
+    []
+  );
+
+  /**
+   * Isolated Type 3/4 file read for importing preferences JSON from any connected drive.
+   */
+  const readRawCloudFile = useCallback(
+    async ({
+      provider,
+      relativePath,
+      fileId,
+    }: {
+      provider: CloudProvider;
+      relativePath: string;
+      fileId?: string;
+    }) => {
+      const client = clientRef.current;
+      if (!client || !client.sessionId) {
+        throw new H2BridgeError('Extension bridge is not connected', 'NOT_CONNECTED');
+      }
+      return client.readFile(relativePath, fileId, 'utf-8', provider, true);
+    },
+    []
+  );
+
+  /**
+   * Isolated Type 5/6 file save for exporting preferences JSON to any connected drive.
+   */
+  const saveRawCloudFile = useCallback(
+    async ({
+      provider,
+      relativePath,
+      fileId,
+      content,
+    }: {
+      provider: CloudProvider;
+      relativePath: string;
+      fileId?: string;
+      content: string;
+    }) => {
+      const client = clientRef.current;
+      if (!client || !client.sessionId) {
+        throw new H2BridgeError('Extension bridge is not connected', 'NOT_CONNECTED');
+      }
+      if (handshakeInfo?.accessMode === 'readonly' || handshakeInfo?.capabilities?.save === false) {
+        throw new H2BridgeError(
+          'Workspace is in read-only mode (saving disabled by extension policy)',
+          'READ_ONLY'
+        );
+      }
+
+      return client.saveFile({
+        provider,
+        driveRoot: true,
+        relativePath,
+        fileId,
+        mimeType: 'application/json',
+        contentType: 'text',
+        encoding: 'utf-8',
+        content,
+      });
+    },
+    [handshakeInfo]
+  );
+
   return {
     sessionId,
     extensionStatus,
@@ -947,6 +1063,9 @@ export function useExtensionBridge({
     saveCloudFile,
     saveAllCloudFiles,
     deleteCloudItem,
+    listDriveEntries,
+    readRawCloudFile,
+    saveRawCloudFile,
     dismissConnectionError: () => {
       setConnectionError(null);
       setConnectionReasonCode(null);

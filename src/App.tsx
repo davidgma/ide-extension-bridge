@@ -33,6 +33,8 @@ import { ExtensionBridgeModal } from './components/ExtensionBridgeModal';
 import { QuickOpenModal } from './components/QuickOpenModal';
 import { SearchWorkspaceModal } from './components/SearchWorkspaceModal';
 import { ShortcutsModal } from './components/ShortcutsModal';
+import { PreferencesExportModal } from './components/PreferencesExportModal';
+import { PreferencesImportModal } from './components/PreferencesImportModal';
 import { AlertTriangle, X } from 'lucide-react';
 
 export default function App() {
@@ -57,6 +59,7 @@ export default function App() {
     setEditorTheme,
     updateSettings,
     resetSettings,
+    importSettingsFromJson,
   } = useIdeSettings();
   const activeTheme = settings.editorTheme;
   const wordWrap = settings.wordWrap;
@@ -78,6 +81,8 @@ export default function App() {
   const [isQuickOpenOpen, setIsQuickOpenOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
+  const [isExportPrefsOpen, setIsExportPrefsOpen] = useState(false);
+  const [isImportPrefsOpen, setIsImportPrefsOpen] = useState(false);
   const [statusNotification, setStatusNotification] = useState<string | null>(null);
 
   const readCloudFileRef = useRef<((file: CloudFile) => Promise<void>) | null>(null);
@@ -108,6 +113,9 @@ export default function App() {
     saveCloudFile,
     saveAllCloudFiles,
     deleteCloudItem,
+    listDriveEntries,
+    readRawCloudFile,
+    saveRawCloudFile,
     dismissConnectionError,
     clearLogs,
   } = useExtensionBridge({
@@ -310,6 +318,20 @@ export default function App() {
   const canCreateFolders = !isReadOnly && (extensionStatus !== 'connected' || handshakeInfo?.capabilities?.createFolders !== false);
   const canDeleteFiles = !isReadOnly && (extensionStatus !== 'connected' || handshakeInfo?.capabilities?.deleteFiles !== false);
   const canDeleteFolders = !isReadOnly && (extensionStatus !== 'connected' || handshakeInfo?.capabilities?.deleteFolders !== false);
+
+  const connectedDrives = useMemo<CloudProvider[]>(() => {
+    const driveMap = handshakeInfo?.drives;
+    if (driveMap && typeof driveMap === 'object') {
+      const list = Object.entries(driveMap)
+        .filter(([, st]) => st?.connected)
+        .map(([drive]) => drive);
+      if (list.length > 0) return list;
+    }
+    if (handshakeInfo?.provider && handshakeInfo.provider !== 'all') {
+      return [handshakeInfo.provider];
+    }
+    return ['pcloud'];
+  }, [handshakeInfo?.drives, handshakeInfo?.provider]);
 
   const activeFile = useMemo(
     () => files.find(f => f.id === activeTabId && !f.isDirectory) || null,
@@ -865,12 +887,8 @@ export default function App() {
           toggleColorMode();
           notify(`Switched to ${next} mode`);
         }}
-        onOpenExportPreferences={() =>
-          notify('Preferences Export to JSON modal will be added in Sub-step 1b')
-        }
-        onOpenImportPreferences={() =>
-          notify('Preferences Import from JSON modal will be added in Sub-step 1b')
-        }
+        onOpenExportPreferences={() => setIsExportPrefsOpen(true)}
+        onOpenImportPreferences={() => setIsImportPrefsOpen(true)}
         onResetPreferences={() => {
           resetSettings();
           notify('Preferences reset to defaults');
@@ -1086,6 +1104,34 @@ export default function App() {
       <ShortcutsModal
         isOpen={isShortcutsOpen}
         onClose={() => setIsShortcutsOpen(false)}
+      />
+
+      {/* Export Preferences to JSON Modal (Step 1b) */}
+      <PreferencesExportModal
+        isOpen={isExportPrefsOpen}
+        settings={settings}
+        isBridgeConnected={extensionStatus === 'connected'}
+        isReadOnly={isReadOnly}
+        canSave={canSave}
+        availableDrives={connectedDrives}
+        listDriveEntries={listDriveEntries}
+        saveRawCloudFile={saveRawCloudFile}
+        onPersistExportOptions={updateSettings}
+        onExportSuccess={notify}
+        onClose={() => setIsExportPrefsOpen(false)}
+      />
+
+      {/* Import Preferences from JSON Modal (Step 1b) */}
+      <PreferencesImportModal
+        isOpen={isImportPrefsOpen}
+        settings={settings}
+        isBridgeConnected={extensionStatus === 'connected'}
+        availableDrives={connectedDrives}
+        listDriveEntries={listDriveEntries}
+        readRawCloudFile={readRawCloudFile}
+        onImportPreferences={importSettingsFromJson}
+        onImportSuccess={notify}
+        onClose={() => setIsImportPrefsOpen(false)}
       />
     </div>
   );

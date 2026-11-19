@@ -161,15 +161,10 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                         closeAllMenus();
                         onOpenExportPreferences();
                       }}
-                      className="w-full px-3 py-1.5 text-left flex items-center justify-between hover:bg-blue-50 dark:hover:bg-blue-950/60 text-xs transition"
+                      className="w-full px-3 py-1.5 text-left flex items-center gap-2 hover:bg-blue-50 dark:hover:bg-blue-950/60 text-xs transition"
                     >
-                      <span className="flex items-center gap-2">
-                        <Download className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                        <span>Export to JSON...</span>
-                      </span>
-                      <span className="text-[10px] font-mono text-slate-400 dark:text-zinc-500">
-                        Step 1b
-                      </span>
+                      <Download className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                      <span>Export to JSON...</span>
                     </button>
 
                     <button
@@ -178,15 +173,10 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                         closeAllMenus();
                         onOpenImportPreferences();
                       }}
-                      className="w-full px-3 py-1.5 text-left flex items-center justify-between hover:bg-blue-50 dark:hover:bg-blue-950/60 text-xs transition"
+                      className="w-full px-3 py-1.5 text-left flex items-center gap-2 hover:bg-blue-50 dark:hover:bg-blue-950/60 text-xs transition"
                     >
-                      <span className="flex items-center gap-2">
-                        <Upload className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                        <span>Import from JSON...</span>
-                      </span>
-                      <span className="text-[10px] font-mono text-slate-400 dark:text-zinc-500">
-                        Step 1b
-                      </span>
+                      <Upload className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                      <span>Import from JSON...</span>
                     </button>
 
                     <div className="my-1 border-t border-slate-200 dark:border-zinc-700/80" />
