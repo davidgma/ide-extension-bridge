@@ -21,6 +21,7 @@ import {
   OpenTabKind,
   BRIDGE_STATUS_TAB_ID,
   BRIDGE_DEBUGGER_TAB_ID,
+  PREFERENCES_TAB_ID,
 } from './types/ide';
 import { INITIAL_CLOUD_FILES, inferMimeType } from './utils/fileSystem';
 import { H2SaveFileRes, H2DeleteFileRes } from './utils/h2BridgeClient';
@@ -28,39 +29,36 @@ import { useExtensionBridge } from './hooks/useExtensionBridge';
 import { useDynamicFavicon } from './hooks/useDynamicFavicon';
 import { useIdeSettings } from './hooks/useIdeSettings';
 import { MenuBar } from './components/MenuBar';
-import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { TabsBar } from './components/TabsBar';
 import { EditorArea } from './components/EditorArea';
 import { ExtensionBridgeStatusPage } from './components/ExtensionBridgeStatusPage';
 import { ExtensionDebuggerPage } from './components/ExtensionDebuggerPage';
+import { PreferencesPage } from './components/PreferencesPage';
 import { StatusBar } from './components/StatusBar';
 import { QuickOpenModal } from './components/QuickOpenModal';
 import { SearchWorkspaceModal } from './components/SearchWorkspaceModal';
 import { ShortcutsModal } from './components/ShortcutsModal';
+import { AboutModal } from './components/AboutModal';
 import { PreferencesExportModal } from './components/PreferencesExportModal';
 import { PreferencesImportModal } from './components/PreferencesImportModal';
 import { AlertTriangle, X } from 'lucide-react';
 
 export default function App() {
-  // State: Workspace files & cloud provider metadata
-  const [files, setFiles] = useState<CloudFile[]>(INITIAL_CLOUD_FILES);
+  // State: Workspace files & cloud provider metadata (start empty to avoid flashing demo tabs before Clockie H2 responds)
+  const [files, setFiles] = useState<CloudFile[]>([]);
   const [cloudProvider, setCloudProvider] = useState<CloudProvider>('Standalone');
   const [selectedDrive, setSelectedDrive] = useState<CloudProvider | undefined>(undefined);
-  const [workspaceName, setWorkspaceName] = useState('FreshFood Vault');
+  const [workspaceName, setWorkspaceName] = useState('Cloud Workspace');
 
   // State: Open tabs
-  const [openTabs, setOpenTabs] = useState<OpenTab[]>([
-    { fileId: 'file-readme', path: 'README.md', title: 'README.md', previewMode: 'split' },
-    { fileId: 'file-engine-ts', path: 'src/api/freshfood-engine.ts', title: 'freshfood-engine.ts', previewMode: 'code' },
-  ]);
-  const [activeTabId, setActiveTabId] = useState<string | null>('file-readme');
+  const [openTabs, setOpenTabs] = useState<OpenTab[]>([]);
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
 
   // State: Persisted IDE preferences & Light/Dark theme (stored in localStorage)
   const {
     settings,
     setColorMode,
-    toggleColorMode,
     setEditorTheme,
     updateSettings,
     resetSettings,
@@ -71,6 +69,9 @@ export default function App() {
   const minimap = settings.minimap;
   const isSidebarOpen = settings.sidebarOpen;
 
+  // State: Resizable sidebar drag status
+  const [isResizingSidebar, setIsResizingSidebar] = useState(false);
+
   // State: Cursor telemetry
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
   const [selectionLength, setSelectionLength] = useState(0);
@@ -79,6 +80,7 @@ export default function App() {
   const [isQuickOpenOpen, setIsQuickOpenOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
+  const [isAboutOpen, setIsAboutOpen] = useState(false);
   const [isExportPrefsOpen, setIsExportPrefsOpen] = useState(false);
   const [isImportPrefsOpen, setIsImportPrefsOpen] = useState(false);
   const [statusNotification, setStatusNotification] = useState<string | null>(null);
@@ -340,22 +342,64 @@ export default function App() {
     [openTabs, activeTabId]
   );
 
-  const lineCount = useMemo(() => {
-    if (!activeFile || activeFile.isBinary || activeFile.contentLoaded === false) return 0;
-    return activeFile.content.split('\n').length;
-  }, [activeFile?.content, activeFile?.isBinary, activeFile?.contentLoaded]);
+  const dirtyFilesCount = useMemo(
+    () => files.filter(f => !f.isDirectory && f.isDirty).length,
+    [files]
+  );
 
-  const charCount = useMemo(() => {
-    if (!activeFile || activeFile.isBinary || activeFile.contentLoaded === false) return 0;
-    return activeFile.content.length;
-  }, [activeFile?.content, activeFile?.isBinary, activeFile?.contentLoaded]);
+  // Sync persisted sidebar width into CSS custom property without inline JSX styles
+  useEffect(() => {
+    document.documentElement.style.setProperty('--monarch-sidebar-width', `${settings.sidebarWidth}px`);
+  }, [settings.sidebarWidth]);
+
+  const handleSidebarResizeMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startWidth = settings.sidebarWidth;
+      let latestWidth = startWidth;
+      setIsResizingSidebar(true);
+
+      const handleMouseMove = (moveEvent: MouseEvent) => {
+        const delta = moveEvent.clientX - startX;
+        const clamped = Math.min(560, Math.max(180, Math.round(startWidth + delta)));
+        latestWidth = clamped;
+        document.documentElement.style.setProperty('--monarch-sidebar-width', `${clamped}px`);
+      };
+
+      const handleMouseUp = () => {
+        window.removeEventListener('mousemove', handleMouseMove);
+        window.removeEventListener('mouseup', handleMouseUp);
+        setIsResizingSidebar(false);
+        updateSettings({ sidebarWidth: latestWidth });
+      };
+
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    },
+    [settings.sidebarWidth, updateSettings]
+  );
 
   const handleCursorChange = useCallback((pos: { line: number; col: number }, selLen: number) => {
     setCursorPos(prev => (prev.line === pos.line && prev.col === pos.col ? prev : pos));
     setSelectionLength(prev => (prev === selLen ? prev : selLen));
   }, []);
 
-  // Open or focus a singleton virtual editor tab (Extension Bridge Status / Debugger)
+  // Manual sample workspace loader when disconnected
+  const handleLoadSampleWorkspace = useCallback(() => {
+    setFiles(INITIAL_CLOUD_FILES);
+    setCloudProvider('Standalone');
+    setSelectedDrive(undefined);
+    setWorkspaceName('FreshFood Vault');
+    setOpenTabs([
+      { fileId: 'file-readme', path: 'README.md', title: 'README.md', previewMode: 'split' },
+      { fileId: 'file-engine-ts', path: 'src/api/freshfood-engine.ts', title: 'freshfood-engine.ts', previewMode: 'code' },
+    ]);
+    setActiveTabId('file-readme');
+    notify('Loaded sample workspace');
+  }, [notify]);
+
+  // Open or focus a singleton virtual editor tab (Bridge Status / Debugger / Preferences)
   const openVirtualTab = useCallback(
     (tabId: string, title: string, kind: OpenTabKind) => {
       setOpenTabs(prev => {
@@ -384,6 +428,10 @@ export default function App() {
     openVirtualTab(BRIDGE_DEBUGGER_TAB_ID, 'Extension Bridge Debugger', 'bridge-debugger');
   }, [openVirtualTab]);
 
+  const handleOpenPreferences = useCallback(() => {
+    openVirtualTab(PREFERENCES_TAB_ID, 'Preferences', 'preferences');
+  }, [openVirtualTab]);
+
   // File selection & lazy H2_READ_FILE_REQ hydration
   const handleSelectFile = useCallback(
     (fileId: string) => {
@@ -407,10 +455,14 @@ export default function App() {
     [files, readCloudFile]
   );
 
-  // Select any tab (virtual Bridge tabs or workspace file tabs)
+  // Select any tab (virtual Bridge/Preferences tabs or workspace file tabs)
   const handleSelectTab = useCallback(
     (tabId: string) => {
-      if (tabId === BRIDGE_STATUS_TAB_ID || tabId === BRIDGE_DEBUGGER_TAB_ID) {
+      if (
+        tabId === BRIDGE_STATUS_TAB_ID ||
+        tabId === BRIDGE_DEBUGGER_TAB_ID ||
+        tabId === PREFERENCES_TAB_ID
+      ) {
         setActiveTabId(tabId);
         return;
       }
@@ -884,6 +936,11 @@ export default function App() {
         updateSettings({ sidebarOpen: !isSidebarOpen });
       }
 
+      if (isCmdOrCtrl && e.key === ',') {
+        e.preventDefault();
+        handleOpenPreferences();
+      }
+
       if (isCmdOrCtrl && !e.shiftKey && e.key.toLowerCase() === 'w' && activeTabId) {
         e.preventDefault();
         handleCloseTab(activeTabId);
@@ -894,9 +951,12 @@ export default function App() {
         !isQuickOpenOpen &&
         !isSearchOpen &&
         !isShortcutsOpen &&
+        !isAboutOpen &&
         !isExportPrefsOpen &&
         !isImportPrefsOpen &&
-        (activeTabId === BRIDGE_STATUS_TAB_ID || activeTabId === BRIDGE_DEBUGGER_TAB_ID)
+        (activeTabId === BRIDGE_STATUS_TAB_ID ||
+          activeTabId === BRIDGE_DEBUGGER_TAB_ID ||
+          activeTabId === PREFERENCES_TAB_ID)
       ) {
         e.preventDefault();
         handleCloseTab(activeTabId);
@@ -909,59 +969,41 @@ export default function App() {
     handleSaveCurrent,
     updateSettings,
     isSidebarOpen,
+    handleOpenPreferences,
     activeTabId,
     handleCloseTab,
     isQuickOpenOpen,
     isSearchOpen,
     isShortcutsOpen,
+    isAboutOpen,
     isExportPrefsOpen,
     isImportPrefsOpen,
   ]);
 
   return (
     <div className="h-screen w-screen flex flex-col bg-slate-50 dark:bg-[#18181b] text-slate-900 dark:text-zinc-200 select-auto overflow-hidden">
-      {/* Always-Visible Main Menu Bar */}
+      {/* Always-Visible Main Menu Bar (Single Top Header Row) */}
       <MenuBar
-        colorMode={settings.colorMode}
-        onSetColorMode={mode => {
-          setColorMode(mode);
-          notify(`Switched to ${mode === 'light' ? 'Light' : 'Dark'} mode`);
-        }}
-        onToggleColorMode={() => {
-          const next = settings.colorMode === 'dark' ? 'Light' : 'Dark';
-          toggleColorMode();
-          notify(`Switched to ${next} mode`);
-        }}
-        onOpenExportPreferences={() => setIsExportPrefsOpen(true)}
-        onOpenImportPreferences={() => setIsImportPrefsOpen(true)}
-        onResetPreferences={() => {
-          resetSettings();
-          notify('Preferences reset to defaults');
-        }}
-        onOpenBridgeStatus={handleOpenBridgeStatus}
-        onOpenBridgeDebugger={handleOpenBridgeDebugger}
-      />
-
-      {/* Top Header */}
-      <Header
-        activeFile={activeFile}
-        files={files}
+        hasActiveFile={Boolean(activeFile)}
+        dirtyFilesCount={dirtyFilesCount}
         isSaving={isSaving}
         isReadOnly={isReadOnly}
         canSave={canSave}
-        activeTheme={activeTheme}
+        sidebarOpen={isSidebarOpen}
         wordWrap={wordWrap}
         minimap={minimap}
-        lineCount={lineCount}
-        charCount={charCount}
-        onThemeChange={setEditorTheme}
-        onToggleWordWrap={() => updateSettings({ wordWrap: !wordWrap })}
-        onToggleMinimap={() => updateSettings({ minimap: !minimap })}
+        onOpenQuickOpen={() => setIsQuickOpenOpen(true)}
         onSaveCurrent={handleSaveCurrent}
         onSaveAll={handleSaveAll}
-        onOpenQuickOpen={() => setIsQuickOpenOpen(true)}
+        onOpenPreferences={handleOpenPreferences}
+        onToggleSidebar={() => updateSettings({ sidebarOpen: !isSidebarOpen })}
         onOpenSearch={() => setIsSearchOpen(true)}
-        onOpenShortcutsModal={() => setIsShortcutsOpen(true)}
+        onToggleWordWrap={() => updateSettings({ wordWrap: !wordWrap })}
+        onToggleMinimap={() => updateSettings({ minimap: !minimap })}
+        onOpenBridgeStatus={handleOpenBridgeStatus}
+        onOpenBridgeDebugger={handleOpenBridgeDebugger}
+        onOpenShortcuts={() => setIsShortcutsOpen(true)}
+        onOpenAbout={() => setIsAboutOpen(true)}
       />
 
       {/* Graceful Connection Refusal Notice */}
@@ -992,37 +1034,59 @@ export default function App() {
         </div>
       )}
 
-      {/* Main Workspace: Sidebar + Editor + Drawers */}
+      {/* Main Workspace: Resizable Sidebar + Splitter + Editor */}
       <div className="flex-1 flex overflow-hidden">
         {isSidebarOpen && (
-          <Sidebar
-            files={files}
-            activeFileId={activeTabId}
-            cloudProvider={cloudProvider}
-            workspaceName={workspaceName}
-            isConnected={extensionStatus === 'connected'}
-            isReadOnly={isReadOnly}
-            canCreateFiles={canCreateFiles}
-            canCreateFolders={canCreateFolders}
-            canDeleteFiles={canDeleteFiles}
-            canDeleteFolders={canDeleteFolders}
-            drives={handshakeInfo?.drives}
-            selectedDrive={selectedDrive}
-            launchedScope={handshakeInfo?.launchedScope}
-            driveRootActive={handshakeInfo?.driveRootActive}
-            onSelectDrive={handleSelectDrive}
-            onReturnToLaunchedScope={handleReturnToLaunchedScope}
-            onRefreshTree={handleRefreshTree}
-            onExpandFolder={handleExpandFolder}
-            onSelectFile={handleSelectFile}
-            onCreateFile={handleCreateFile}
-            onCreateFolder={handleCreateFolder}
-            onDeleteFile={handleDeleteFile}
-            onDeleteFolder={handleDeleteFolder}
-            onRenameFile={handleRenameFile}
-            onUploadFiles={handleUploadFiles}
-            onExportWorkspace={handleExportWorkspace}
-          />
+          <>
+            <div className="w-[var(--monarch-sidebar-width,260px)] h-full shrink-0 overflow-hidden">
+              <Sidebar
+                files={files}
+                activeFileId={activeTabId}
+                cloudProvider={cloudProvider}
+                workspaceName={workspaceName}
+                isConnected={extensionStatus === 'connected'}
+                isReadOnly={isReadOnly}
+                canCreateFiles={canCreateFiles}
+                canCreateFolders={canCreateFolders}
+                canDeleteFiles={canDeleteFiles}
+                canDeleteFolders={canDeleteFolders}
+                drives={handshakeInfo?.drives}
+                selectedDrive={selectedDrive}
+                launchedScope={handshakeInfo?.launchedScope}
+                driveRootActive={handshakeInfo?.driveRootActive}
+                onSelectDrive={handleSelectDrive}
+                onReturnToLaunchedScope={handleReturnToLaunchedScope}
+                onRefreshTree={handleRefreshTree}
+                onExpandFolder={handleExpandFolder}
+                onSelectFile={handleSelectFile}
+                onCreateFile={handleCreateFile}
+                onCreateFolder={handleCreateFolder}
+                onDeleteFile={handleDeleteFile}
+                onDeleteFolder={handleDeleteFolder}
+                onRenameFile={handleRenameFile}
+                onUploadFiles={handleUploadFiles}
+                onExportWorkspace={handleExportWorkspace}
+              />
+            </div>
+
+            {/* Resizable Vertical Splitter Divider */}
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize primary sidebar"
+              onMouseDown={handleSidebarResizeMouseDown}
+              onDoubleClick={() => {
+                updateSettings({ sidebarWidth: 260 });
+                notify('Sidebar width reset to 260 px');
+              }}
+              title="Drag to resize sidebar (double-click to reset)"
+              className={`w-1 h-full shrink-0 cursor-col-resize transition-colors border-r border-slate-200 dark:border-zinc-800 ${
+                isResizingSidebar
+                  ? 'bg-blue-600 border-blue-600'
+                  : 'bg-slate-100 dark:bg-[#1b1b1e] hover:bg-blue-500/80 dark:hover:bg-blue-500/80'
+              }`}
+            />
+          </>
         )}
 
         {/* Center Editor Container */}
@@ -1049,6 +1113,7 @@ export default function App() {
                 fontSize={settings.fontSize}
                 tabSize={settings.tabSize}
                 isReadOnly={isReadOnly}
+                isConnectingBridge={extensionStatus === 'connecting'}
                 bridgeStatusView={
                   <ExtensionBridgeStatusPage
                     sessionId={sessionId}
@@ -1076,6 +1141,29 @@ export default function App() {
                     onConnectBridge={() => startBridge()}
                   />
                 }
+                preferencesView={
+                  <PreferencesPage
+                    settings={settings}
+                    isBridgeConnected={extensionStatus === 'connected'}
+                    onSetColorMode={mode => {
+                      setColorMode(mode);
+                      notify(`Switched to ${mode === 'light' ? 'Light' : 'Dark'} mode`);
+                    }}
+                    onSetEditorTheme={theme => {
+                      setEditorTheme(theme);
+                      notify(`Editor theme: ${theme}`);
+                    }}
+                    onUpdateSettings={updateSettings}
+                    onOpenExportPreferences={() => setIsExportPrefsOpen(true)}
+                    onOpenImportPreferences={() => setIsImportPrefsOpen(true)}
+                    onResetPreferences={() => {
+                      resetSettings();
+                      notify('Preferences reset to defaults');
+                    }}
+                    onClose={() => handleCloseTab(PREFERENCES_TAB_ID)}
+                  />
+                }
+                onLoadSampleWorkspace={handleLoadSampleWorkspace}
                 onContentChange={handleContentChange}
                 onSaveFile={saveCloudFile}
                 onRetryLoadFile={handleRetryLoadFile}
@@ -1122,6 +1210,14 @@ export default function App() {
       <ShortcutsModal
         isOpen={isShortcutsOpen}
         onClose={() => setIsShortcutsOpen(false)}
+      />
+
+      {/* About Monarch IDE Modal */}
+      <AboutModal
+        isOpen={isAboutOpen}
+        extensionStatus={extensionStatus}
+        handshakeInfo={handshakeInfo}
+        onClose={() => setIsAboutOpen(false)}
       />
 
       {/* Export Preferences to JSON Modal (Step 1b) */}

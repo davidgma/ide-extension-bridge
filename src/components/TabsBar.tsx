@@ -15,6 +15,7 @@ import {
   Code,
   Radio,
   Bug,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { getFileExtension, isMarkdownFile, isImageFile, isVideoFile } from '../utils/fileSystem';
 
@@ -53,6 +54,9 @@ export const TabsBar: React.FC<TabsBarProps> = ({
     if (tab.kind === 'bridge-debugger') {
       return <Bug className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />;
     }
+    if (tab.kind === 'preferences') {
+      return <SlidersHorizontal className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />;
+    }
 
     const ext = getFileExtension(tab.title);
     if (isImageFile(tab.title)) return <ImageIcon className="w-3.5 h-3.5 text-red-500 dark:text-red-400" />;
@@ -81,7 +85,7 @@ export const TabsBar: React.FC<TabsBarProps> = ({
       {/* Scrollable Tabs */}
       <div className="flex items-center h-full overflow-x-auto no-scrollbar flex-1">
         {openTabs.map(tab => {
-          const isVirtual = tab.kind === 'bridge-status' || tab.kind === 'bridge-debugger';
+          const isVirtual = Boolean(tab.kind && tab.kind !== 'file');
           const file = isVirtual ? undefined : files.find(f => f.id === tab.fileId);
           const isActive = tab.fileId === activeTabId;
           const isDirty = file?.isDirty;

@@ -412,7 +412,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   return (
-    <aside className="w-64 h-full bg-slate-100 dark:bg-[#1b1b1e] border-r border-slate-200 dark:border-zinc-800 flex flex-col select-auto shrink-0">
+    <aside className="w-full h-full bg-slate-100 dark:bg-[#1b1b1e] flex flex-col select-auto">
       {/* Workspace Cloud Header */}
       <div className="p-3 border-b border-slate-200 dark:border-zinc-800/80 bg-slate-50/70 dark:bg-zinc-900/40 space-y-2">
         <div className="flex items-center justify-between gap-2">

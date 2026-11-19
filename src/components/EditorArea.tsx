@@ -34,8 +34,11 @@ interface EditorAreaProps {
   fontSize?: number;
   tabSize?: number;
   isReadOnly?: boolean;
+  isConnectingBridge?: boolean;
   bridgeStatusView?: React.ReactNode;
   bridgeDebuggerView?: React.ReactNode;
+  preferencesView?: React.ReactNode;
+  onLoadSampleWorkspace?: () => void;
   onContentChange: (fileId: string, newContent: string) => void;
   onSaveFile: (file: CloudFile) => void;
   onRetryLoadFile: (file: CloudFile) => void;
@@ -55,8 +58,11 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
   fontSize = 13.5,
   tabSize = 2,
   isReadOnly = false,
+  isConnectingBridge = false,
   bridgeStatusView,
   bridgeDebuggerView,
+  preferencesView,
+  onLoadSampleWorkspace,
   onContentChange,
   onSaveFile,
   onRetryLoadFile,
@@ -120,7 +126,7 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
     }
   }, [activeTheme]);
 
-  // Render full-page Extension Bridge views when selected as tabs
+  // Render full-page Extension Bridge & Preferences views when selected as tabs
   if (activeTab?.kind === 'bridge-status' && bridgeStatusView) {
     return <>{bridgeStatusView}</>;
   }
@@ -129,7 +135,11 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
     return <>{bridgeDebuggerView}</>;
   }
 
-  // Welcome Hero when no file or bridge tab is open
+  if (activeTab?.kind === 'preferences' && preferencesView) {
+    return <>{preferencesView}</>;
+  }
+
+  // Welcome Hero when no file or virtual tab is open
   if (!activeFile) {
     const recentFiles = files.filter(f => !f.isDirectory).slice(0, 6);
     return (
@@ -180,8 +190,21 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
             </div>
             <div className="space-y-1">
               {recentFiles.length === 0 ? (
-                <div className="text-xs text-slate-500 dark:text-zinc-500 py-2 italic">
-                  No files loaded yet. Expand a folder in the sidebar or select a connected drive.
+                <div className="text-xs text-slate-500 dark:text-zinc-500 py-2 space-y-2">
+                  <div className="italic">
+                    {isConnectingBridge
+                      ? 'Connecting to Clockie H2 extension bridge...'
+                      : 'No workspace files loaded yet. Open Bridge → Status or select a connected drive.'}
+                  </div>
+                  {!isConnectingBridge && onLoadSampleWorkspace && (
+                    <button
+                      type="button"
+                      onClick={onLoadSampleWorkspace}
+                      className="text-[11px] font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                    >
+                      Load sample workspace files
+                    </button>
+                  )}
                 </div>
               ) : (
                 recentFiles.map(file => (

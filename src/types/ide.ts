@@ -98,8 +98,9 @@ export interface FileTreeNode {
 
 export const BRIDGE_STATUS_TAB_ID = '__bridge_status__' as const;
 export const BRIDGE_DEBUGGER_TAB_ID = '__bridge_debugger__' as const;
+export const PREFERENCES_TAB_ID = '__preferences__' as const;
 
-export type OpenTabKind = 'file' | 'bridge-status' | 'bridge-debugger';
+export type OpenTabKind = 'file' | 'bridge-status' | 'bridge-debugger' | 'preferences';
 
 export interface OpenTab {
   fileId: string;

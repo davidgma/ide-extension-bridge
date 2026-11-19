@@ -6,7 +6,7 @@
  * - Monaco Editor Keybindings: https://microsoft.github.io/monaco-editor/
  */
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { X, Command, BookOpen, Cloud, ShieldCheck } from 'lucide-react';
 
 interface ShortcutsModalProps {
@@ -15,13 +15,27 @@ interface ShortcutsModalProps {
 }
 
 export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose }) => {
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const shortcuts = [
     { key: 'Cmd + S / Ctrl + S', desc: 'Save active file to Cloud Storage (H2_SAVE_FILE_REQ)' },
     { key: 'Cmd + P / Ctrl + P', desc: 'Quick Open file switcher' },
     { key: 'Cmd + Shift + F', desc: 'Global workspace search (loaded files)' },
-    { key: 'Cmd + B / Ctrl + B', desc: 'Toggle File Explorer Sidebar' },
+    { key: 'Cmd + B / Ctrl + B', desc: 'Toggle Primary Side Bar' },
+    { key: 'Cmd + , / Ctrl + ,', desc: 'Open Preferences tab' },
+    { key: 'Cmd + W / Ctrl + W', desc: 'Close active editor tab' },
     { key: 'Cmd + F / Ctrl + F', desc: 'Find within current editor' },
     { key: 'Shift + Alt + F', desc: 'Format active document' },
   ];
