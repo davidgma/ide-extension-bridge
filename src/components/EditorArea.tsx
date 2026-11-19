@@ -23,6 +23,7 @@ import {
   AlertTriangle,
   DownloadCloud,
   Lock,
+  FilePlus,
 } from 'lucide-react';
 
 interface EditorAreaProps {
@@ -42,6 +43,8 @@ interface EditorAreaProps {
   onLoadSampleWorkspace?: () => void;
   onContentChange: (fileId: string, newContent: string) => void;
   onSaveFile: (file: CloudFile) => void;
+  onSaveAsFile?: (file: CloudFile) => void;
+  onNewFile?: () => void;
   onRetryLoadFile: (file: CloudFile) => void;
   onCursorChange: (pos: { line: number; col: number }, selectionLength: number) => void;
   onOpenQuickOpen: () => void;
@@ -68,6 +71,8 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
   onLoadSampleWorkspace,
   onContentChange,
   onSaveFile,
+  onSaveAsFile,
+  onNewFile,
   onRetryLoadFile,
   onCursorChange,
   onOpenQuickOpen,
@@ -80,9 +85,13 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
   const editorRef = useRef<any>(null);
   const onCursorChangeRef = useRef(onCursorChange);
   const onSaveFileRef = useRef(onSaveFile);
+  const onSaveAsFileRef = useRef(onSaveAsFile);
+  const onNewFileRef = useRef(onNewFile);
   const onOpenQuickOpenRef = useRef(onOpenQuickOpen);
   const onOpenCommandPaletteRef = useRef(onOpenCommandPalette);
   const activeFileRef = useRef(activeFile);
+  // Tracks the last externalVersion synced into each Monaco model so rapid local typing is never overwritten
+  const syncedExternalVersionRef = useRef<Record<string, number>>({});
 
   useEffect(() => {
     onCursorChangeRef.current = onCursorChange;
@@ -95,8 +104,10 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
 
   useEffect(() => {
     onSaveFileRef.current = onSaveFile;
+    onSaveAsFileRef.current = onSaveAsFile;
+    onNewFileRef.current = onNewFile;
     activeFileRef.current = activeFile;
-  }, [onSaveFile, activeFile]);
+  }, [onSaveFile, onSaveAsFile, onNewFile, activeFile]);
 
   const handleEditorMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
@@ -105,10 +116,41 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
     registerMonarchThemesAndLanguages(monaco);
     monaco.editor.setTheme(activeTheme);
 
+    if (activeFileRef.current) {
+      syncedExternalVersionRef.current[activeFileRef.current.id] =
+        activeFileRef.current.externalVersion ?? 0;
+    }
+
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
       if (activeFileRef.current) {
         onSaveFileRef.current(activeFileRef.current);
       }
+    });
+
+    editor.addCommand(
+      monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyS,
+      () => {
+        if (activeFileRef.current) {
+          onSaveAsFileRef.current?.(activeFileRef.current);
+        }
+      }
+    );
+
+    editor.addCommand(
+      monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyN,
+      () => {
+        if (activeFileRef.current) {
+          onSaveAsFileRef.current?.(activeFileRef.current);
+        }
+      }
+    );
+
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyN, () => {
+      onNewFileRef.current?.();
+    });
+
+    editor.addCommand(monaco.KeyMod.Alt | monaco.KeyCode.KeyN, () => {
+      onNewFileRef.current?.();
     });
 
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyP, () => {
@@ -148,6 +190,36 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
     }
   }, [activeTheme]);
 
+  // Synchronize Monaco model content ONLY when content changed externally (never during user typing)
+  useEffect(() => {
+    if (!activeFile || !monacoRef.current) return;
+    const monaco = monacoRef.current;
+    const model = monaco.editor.getModel(monaco.Uri.parse(activeFile.id));
+    if (!model) return;
+
+    const extVer = activeFile.externalVersion ?? 0;
+    const prevSynced = syncedExternalVersionRef.current[activeFile.id];
+
+    if (prevSynced !== extVer) {
+      if (model.getValue() !== activeFile.content) {
+        model.setValue(activeFile.content);
+      }
+      syncedExternalVersionRef.current[activeFile.id] = extVer;
+    }
+  }, [activeFile?.id, activeFile?.externalVersion, activeFile?.content]);
+
+  const activeLanguage = activeFile ? getMonacoLanguage(activeFile.name) : 'plaintext';
+
+  // Ensure Monaco switches syntax highlighting cleanly when an untitled or renamed file gets a new extension
+  useEffect(() => {
+    if (!activeFile || !monacoRef.current) return;
+    const monaco = monacoRef.current;
+    const model = monaco.editor.getModel(monaco.Uri.parse(activeFile.id));
+    if (model && model.getLanguageId() !== activeLanguage) {
+      monaco.editor.setModelLanguage(model, activeLanguage);
+    }
+  }, [activeFile?.id, activeLanguage]);
+
   // Render full-page Extension Bridge & Preferences views when selected as tabs
   if (activeTab?.kind === 'bridge-status' && bridgeStatusView) {
     return <>{bridgeStatusView}</>;
@@ -163,10 +235,11 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
 
   // Welcome Hero when no file or virtual tab is open
   if (!activeFile) {
-    const recentFiles = files.filter(f => !f.isDirectory).slice(0, 6);
+    const workspaceFiles = files.filter(f => !f.isDirectory && !f.isUntitled);
+    const recentFiles = workspaceFiles.slice(0, 6);
     return (
       <div className="h-full w-full flex flex-col items-center justify-center bg-slate-50 dark:bg-[#18181b] p-6 text-center select-auto">
-        <div className="max-w-md w-full space-y-6">
+        <div className="max-w-lg w-full space-y-6">
           <div className="mx-auto w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-500 to-blue-600 flex items-center justify-center shadow-xl shadow-emerald-950/30">
             <Radio className="w-8 h-8 text-white" />
           </div>
@@ -180,8 +253,23 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
             </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 text-left">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-left">
             <button
+              type="button"
+              onClick={onNewFile}
+              className="p-3 rounded-xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 hover:border-blue-500/60 hover:bg-slate-100/70 dark:hover:bg-zinc-800/70 transition group shadow-2xs"
+            >
+              <div className="flex items-center gap-2 text-slate-800 dark:text-zinc-200 group-hover:text-blue-600 dark:group-hover:text-blue-400 font-semibold text-xs">
+                <FilePlus className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                <span>New File</span>
+              </div>
+              <div className="text-[11px] text-slate-500 dark:text-zinc-500 mt-1 font-mono">
+                Alt+N / Ctrl+N
+              </div>
+            </button>
+
+            <button
+              type="button"
               onClick={onOpenQuickOpen}
               className="p-3 rounded-xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 hover:border-emerald-500/60 hover:bg-slate-100/70 dark:hover:bg-zinc-800/70 transition group shadow-2xs"
             >
@@ -189,10 +277,11 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
                 <Search className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                 <span>Quick Open</span>
               </div>
-              <div className="text-[11px] text-slate-500 dark:text-zinc-500 mt-1 font-mono">⌘P / Ctrl+P</div>
+              <div className="text-[11px] text-slate-500 dark:text-zinc-500 mt-1 font-mono">Ctrl+P</div>
             </button>
 
             <button
+              type="button"
               onClick={onOpenSearch}
               className="p-3 rounded-xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 hover:border-blue-500/60 hover:bg-slate-100/70 dark:hover:bg-zinc-800/70 transition group shadow-2xs"
             >
@@ -201,14 +290,14 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
                 <span>Search Workspace</span>
               </div>
               <div className="text-[11px] text-slate-500 dark:text-zinc-500 mt-1 font-mono font-normal">
-                ⌘⇧F / Ctrl+Shift+F
+                Ctrl+Shift+F
               </div>
             </button>
           </div>
 
           <div className="text-left bg-white dark:bg-zinc-900/60 border border-slate-200 dark:border-zinc-800 rounded-xl p-3 shadow-2xs">
             <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-500 font-mono tracking-wider mb-2">
-              Workspace Files ({files.filter(f => !f.isDirectory).length})
+              Workspace Files ({workspaceFiles.length})
             </div>
             <div className="space-y-1">
               {recentFiles.length === 0 ? (
@@ -332,13 +421,14 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
         <div className={`h-full ${isMd && previewMode === 'split' ? 'w-1/2 border-r border-slate-200 dark:border-zinc-800' : 'w-full'}`}>
           <Editor
             height="100%"
+            path={activeFile.id}
             language={language}
-            value={activeFile.content}
+            defaultValue={activeFile.content}
             theme={activeTheme}
             onMount={handleEditorMount}
             onChange={val => {
               if (!isReadOnly) {
-                onContentChange(activeFile.id, val || '');
+                onContentChange(activeFile.id, val ?? '');
               }
             }}
             options={{

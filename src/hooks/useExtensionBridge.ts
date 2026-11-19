@@ -70,7 +70,7 @@ interface UseExtensionBridgeProps {
   onFolderChildrenLoadError?: (basePath: string, error: string) => void;
   onFileContentLoaded?: (relativePath: string, updatedFields: Partial<CloudFile>) => void;
   onFileContentLoadError?: (relativePath: string, error: string) => void;
-  onFileSaveConfirmed?: (localId: string, res: H2SaveFileRes) => void;
+  onFileSaveConfirmed?: (localId: string, res: H2SaveFileRes, savedContent: string) => void;
   onFileSaveError?: (localId: string, error: string) => void;
   onItemDeleted?: (
     itemType: 'file' | 'folder',
@@ -215,6 +215,7 @@ export function useExtensionBridge({
   const manuallyDisconnectedRef = useRef(false);
   const refusedReasonRef = useRef<string | null>(null);
   const statusRef = useRef<ExtensionStatus>('disconnected');
+  const savingIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     statusRef.current = extensionStatus;
@@ -951,7 +952,7 @@ export function useExtensionBridge({
     [handshakeInfo?.driveRootActive]
   );
 
-  /** Type 5/6: Save existing file or create new file/subdirectories (guarded by accessMode & capability) */
+  /** Type 5/6: Save existing file or create new file/subdirectories (guarded by accessMode, capability & in-flight deduplication) */
   const saveCloudFile = useCallback(
     async (file: CloudFile) => {
       const client = clientRef.current;
@@ -973,6 +974,11 @@ export function useExtensionBridge({
         return;
       }
 
+      if (savingIdsRef.current.has(file.id)) {
+        return;
+      }
+
+      savingIdsRef.current.add(file.id);
       setIsSaving(true);
       try {
         const isBinary = Boolean(file.isBinary);
@@ -995,11 +1001,12 @@ export function useExtensionBridge({
           content: contentToSend,
         });
 
-        onFileSaveConfirmedRef.current?.(file.id, res);
+        onFileSaveConfirmedRef.current?.(file.id, res, contentToSend);
       } catch (err: any) {
         onFileSaveErrorRef.current?.(file.id, err?.message || 'Save failed');
       } finally {
-        setIsSaving(false);
+        savingIdsRef.current.delete(file.id);
+        setIsSaving(savingIdsRef.current.size > 0);
       }
     },
     [handshakeInfo]
@@ -1388,6 +1395,104 @@ export function useExtensionBridge({
     [handshakeInfo]
   );
 
+  /**
+   * Promise-returning Type 5/6 save for File -> Save As... across any connected drive/folder.
+   */
+  const saveAsCloudFile = useCallback(
+    async ({
+      provider,
+      driveRoot = true,
+      relativePath,
+      existingFileId,
+      mimeType,
+      contentType = 'text',
+      encoding = 'utf-8',
+      content,
+    }: {
+      provider: CloudProvider;
+      driveRoot?: boolean;
+      relativePath: string;
+      existingFileId?: string;
+      mimeType?: string;
+      contentType?: 'text' | 'binary';
+      encoding?: 'utf-8' | 'base64';
+      content: string;
+    }) => {
+      const client = clientRef.current;
+      if (!client || !client.sessionId) {
+        throw new H2BridgeError('Extension bridge is not connected', 'NOT_CONNECTED');
+      }
+      if (handshakeInfo?.accessMode === 'readonly' || handshakeInfo?.capabilities?.save === false) {
+        throw new H2BridgeError(
+          'Workspace is in read-only mode (saving disabled by extension policy)',
+          'READ_ONLY'
+        );
+      }
+
+      setIsSaving(true);
+      try {
+        return await client.saveFile({
+          provider,
+          driveRoot,
+          relativePath,
+          fileId: existingFileId,
+          mimeType: mimeType || inferMimeType(relativePath),
+          contentType,
+          encoding,
+          content,
+        });
+      } finally {
+        setIsSaving(savingIdsRef.current.size > 0);
+      }
+    },
+    [handshakeInfo]
+  );
+
+  /**
+   * Promise-returning Type 9/10 folder creation for modal pickers (e.g. Save As... -> New Folder).
+   */
+  const createRawCloudFolder = useCallback(
+    async ({
+      provider,
+      driveRoot = true,
+      relativePath,
+      parentRelativePath,
+      parentFolderId,
+      folderName,
+    }: {
+      provider: CloudProvider;
+      driveRoot?: boolean;
+      relativePath: string;
+      parentRelativePath?: string;
+      parentFolderId?: string;
+      folderName?: string;
+    }) => {
+      const client = clientRef.current;
+      if (!client || !client.sessionId) {
+        throw new H2BridgeError('Extension bridge is not connected', 'NOT_CONNECTED');
+      }
+      if (
+        handshakeInfo?.accessMode === 'readonly' ||
+        handshakeInfo?.capabilities?.createFolders === false
+      ) {
+        throw new H2BridgeError(
+          'Folder creation is disabled by extension policy',
+          'CAPABILITY_DISABLED'
+        );
+      }
+
+      return client.createFolder({
+        provider,
+        driveRoot,
+        relativePath,
+        parentRelativePath,
+        parentFolderId,
+        folderName,
+      });
+    },
+    [handshakeInfo]
+  );
+
   return {
     sessionId,
     extensionStatus,
@@ -1411,6 +1516,8 @@ export function useExtensionBridge({
     listDriveEntries,
     readRawCloudFile,
     saveRawCloudFile,
+    saveAsCloudFile,
+    createRawCloudFolder,
     dismissConnectionError: () => {
       setConnectionError(null);
       setConnectionReasonCode(null);

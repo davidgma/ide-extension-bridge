@@ -1,5 +1,5 @@
 /**
- * Keyboard Shortcuts & H2_CLOUD_BRIDGE v1.3 Reference Modal.
+ * Keyboard Shortcuts & H2_CLOUD_BRIDGE v1.4 Reference Modal.
  *
  * Official Documentation:
  * - React: https://react.dev/reference/react
@@ -30,14 +30,16 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
   if (!isOpen) return null;
 
   const shortcuts = [
-    { key: 'Cmd + Shift + P / F1', desc: 'Open Command Palette (IDE commands, type/clear > to toggle)' },
-    { key: 'Cmd + P / Ctrl + P', desc: 'Quick Open file switcher (type > for Command Palette)' },
-    { key: 'Cmd + S / Ctrl + S', desc: 'Save active file to Cloud Storage (H2_SAVE_FILE_REQ)' },
-    { key: 'Cmd + Shift + F', desc: 'Global workspace search (loaded files)' },
-    { key: 'Cmd + B / Ctrl + B', desc: 'Toggle Primary Side Bar' },
-    { key: 'Cmd + , / Ctrl + ,', desc: 'Open Preferences tab' },
-    { key: 'Cmd + W / Ctrl + W', desc: 'Close active editor tab' },
-    { key: 'Cmd + F / Ctrl + F', desc: 'Find within current editor' },
+    { key: 'Ctrl + N / Alt + N', desc: 'Create new untitled scratchpad file (use Alt+N in normal browser tabs)' },
+    { key: 'Ctrl + S', desc: 'Save active file (opens Save As... for untitled files)' },
+    { key: 'Ctrl + Shift + S / Ctrl + Alt + N', desc: 'Save As... to choose drive, folder, and filename' },
+    { key: 'Ctrl + Shift + P / F1', desc: 'Open Command Palette (IDE commands, type/clear > to toggle)' },
+    { key: 'Ctrl + P', desc: 'Quick Open file switcher (type > for Command Palette)' },
+    { key: 'Ctrl + Shift + F', desc: 'Global workspace search (loaded files)' },
+    { key: 'Ctrl + B', desc: 'Toggle Primary Side Bar' },
+    { key: 'Ctrl + ,', desc: 'Open Preferences tab' },
+    { key: 'Ctrl + W', desc: 'Close active editor tab (prompts if unsaved)' },
+    { key: 'Ctrl + F', desc: 'Find within current editor' },
     { key: 'Shift + Alt + F', desc: 'Format active document' },
   ];
 
@@ -53,7 +55,7 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900">
           <div className="flex items-center gap-2 text-slate-900 dark:text-white font-bold text-base">
             <BookOpen className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-            <span>Monarch IDE & H2_CLOUD_BRIDGE v1.3 Docs</span>
+            <span>Monarch IDE & H2_CLOUD_BRIDGE v1.4 Docs</span>
           </div>
           <button onClick={onClose} className="p-1 hover:bg-slate-200 dark:hover:bg-zinc-800 rounded text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white">
             <X className="w-5 h-5" />
@@ -64,7 +66,7 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
           <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-500/30 text-emerald-800 dark:text-emerald-300">
             <h4 className="font-semibold text-slate-900 dark:text-white mb-1 flex items-center gap-1.5">
               <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-              <span>Production Domain: ide.freshfood.rocks (v1.3)</span>
+              <span>Production Domain: ide.freshfood.rocks (v1.4)</span>
             </h4>
             <p className="text-slate-700 dark:text-zinc-300 leading-relaxed text-[11.5px]">
               This Single Page Application runs at{' '}
@@ -100,7 +102,7 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
           <div>
             <h4 className="font-semibold text-slate-900 dark:text-white text-sm mb-2 flex items-center gap-1.5">
               <Cloud className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-              <span>Clockie H2 Bridge Protocol v1.3 (H2_CLOUD_BRIDGE)</span>
+              <span>Clockie H2 Bridge Protocol v1.4 (H2_CLOUD_BRIDGE)</span>
             </h4>
             <ul className="list-disc pl-5 space-y-1.5 text-slate-600 dark:text-zinc-400 text-[11.5px] leading-relaxed">
               <li>
@@ -117,6 +119,12 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
               </li>
               <li>
                 <strong className="text-slate-900 dark:text-zinc-200 font-mono">H2_SAVE_FILE_REQ / H2_DELETE_FILE_REQ</strong>: Readwrite cloud saves, nested file creation, and deletion.
+              </li>
+              <li>
+                <strong className="text-slate-900 dark:text-zinc-200 font-mono">H2_CREATE_FOLDER_REQ / H2_DELETE_FOLDER_REQ</strong>: Dedicated folder creation and deletion.
+              </li>
+              <li>
+                <strong className="text-slate-900 dark:text-zinc-200 font-mono">H2_MOVE_FILE_REQ / H2_MOVE_FOLDER_REQ</strong>: Same-drive native pointer-based moves & renames with overwrite/collision handling.
               </li>
               <li>
                 <strong className="text-slate-900 dark:text-zinc-200 font-mono">H2_DISCONNECT_REQ / H2_DISCONNECT_RES</strong>: Clean session termination and sessionStorage cleanup.

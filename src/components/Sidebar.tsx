@@ -179,21 +179,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
   >(null);
   const [conflictRenameInput, setConflictRenameInput] = useState('');
 
-  const fileCount = React.useMemo(() => files.filter(f => !f.isDirectory).length, [files]);
+  const fileCount = React.useMemo(
+    () => files.filter(f => !f.isDirectory && !f.isUntitled).length,
+    [files]
+  );
 
   const connectedDrives = React.useMemo(() => {
     if (!drives) return [];
     return Object.entries(drives).filter(([, status]) => status?.connected);
   }, [drives]);
 
-  // Filter files if searching
+  // Filter files if searching (untitled files live strictly in the tab bar until saved)
   const filteredFiles = React.useMemo(
     () =>
       files.filter(
         f =>
-          !searchTerm ||
-          f.path.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          f.name.toLowerCase().includes(searchTerm.toLowerCase())
+          !f.isUntitled &&
+          (!searchTerm ||
+            f.path.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            f.name.toLowerCase().includes(searchTerm.toLowerCase()))
       ),
     [files, searchTerm]
   );

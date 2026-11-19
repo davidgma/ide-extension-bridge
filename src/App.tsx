@@ -53,6 +53,8 @@ import { ShortcutsModal } from './components/ShortcutsModal';
 import { AboutModal } from './components/AboutModal';
 import { PreferencesExportModal } from './components/PreferencesExportModal';
 import { PreferencesImportModal } from './components/PreferencesImportModal';
+import { SaveAsModal, SaveAsConfirmParams } from './components/SaveAsModal';
+import { UnsavedChangesModal, PendingTabCloseRequest } from './components/UnsavedChangesModal';
 import { AlertTriangle, X } from 'lucide-react';
 
 export default function App() {
@@ -96,12 +98,17 @@ export default function App() {
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const [isExportPrefsOpen, setIsExportPrefsOpen] = useState(false);
   const [isImportPrefsOpen, setIsImportPrefsOpen] = useState(false);
+  const [saveAsTargetFileId, setSaveAsTargetFileId] = useState<string | null>(null);
+  const [pendingCloseRequest, setPendingCloseRequest] = useState<PendingTabCloseRequest | null>(null);
   const [statusNotification, setStatusNotification] = useState<string | null>(null);
   const [moveConflict, setMoveConflict] = useState<SidebarMoveConflict | null>(null);
 
   const readCloudFileRef = useRef<((file: CloudFile) => Promise<void>) | null>(null);
   const filesRef = useRef<CloudFile[]>(files);
   const knownBridgeDrivesRef = useRef<string[]>(settings.knownBridgeDrives);
+  const untitledCounterRef = useRef<number>(1);
+  const latestContentByIdRef = useRef<Record<string, string>>({});
+  const pendingSaveThenCloseIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     filesRef.current = files;
@@ -303,6 +310,8 @@ export default function App() {
     listDriveEntries,
     readRawCloudFile,
     saveRawCloudFile,
+    saveAsCloudFile,
+    createRawCloudFolder,
     dismissConnectionError,
     clearLogs,
   } = useExtensionBridge({
@@ -399,9 +408,19 @@ export default function App() {
 
     onFileContentLoaded: (relativePath, updatedFields) => {
       setFiles(prev =>
-        prev.map(f =>
-          !f.isDirectory && f.path === relativePath ? { ...f, ...updatedFields } : f
-        )
+        prev.map(f => {
+          if (!f.isDirectory && f.path === relativePath) {
+            if (typeof updatedFields.content === 'string') {
+              latestContentByIdRef.current[f.id] = updatedFields.content;
+            }
+            return {
+              ...f,
+              ...updatedFields,
+              externalVersion: (f.externalVersion ?? 0) + 1,
+            };
+          }
+          return f;
+        })
       );
     },
 
@@ -416,42 +435,67 @@ export default function App() {
       notify(`Failed to load ${relativePath}: ${error}`);
     },
 
-    onFileSaveConfirmed: (localId, res: H2SaveFileRes) => {
+    onFileSaveConfirmed: (localId, res: H2SaveFileRes, savedContent: string) => {
+      let hasNewerLocalEdits = false;
       setFiles(prev =>
-        prev.map(f =>
-          f.id === localId
-            ? {
-                ...f,
-                cloudFileId: res.fileId ?? f.cloudFileId,
-                parentId: res.parentFolderId ?? f.parentId,
-                path: res.relativePath || f.path,
-                name: res.filename || f.name,
-                size: res.sizeBytes ?? f.size,
-                modifiedMs: res.modifiedMs ?? f.modifiedMs,
-                lastModified: res.modifiedMs
-                  ? new Date(res.modifiedMs).toLocaleTimeString()
-                  : new Date().toLocaleTimeString(),
-                isDirty: false,
-              }
-            : f
-        )
+        prev.map(f => {
+          if (f.id === localId) {
+            const latestContent = latestContentByIdRef.current[f.id] ?? f.content;
+            const stillModified = latestContent !== savedContent;
+            hasNewerLocalEdits = stillModified;
+            return {
+              ...f,
+              isUntitled: false,
+              cloudProvider: res.provider || f.cloudProvider,
+              cloudFileId: res.fileId ?? f.cloudFileId,
+              parentId: res.parentFolderId ?? f.parentId,
+              path: res.relativePath || f.path,
+              name: res.filename || f.name,
+              mimeType: res.filename ? inferMimeType(res.filename) : f.mimeType,
+              size: res.sizeBytes ?? f.size,
+              modifiedMs: res.modifiedMs ?? f.modifiedMs,
+              lastModified: res.modifiedMs
+                ? new Date(res.modifiedMs).toLocaleTimeString()
+                : new Date().toLocaleTimeString(),
+              isDirty: stillModified,
+            };
+          }
+          return f;
+        })
       );
-      setOpenTabs(prev =>
-        prev.map(t =>
-          t.fileId === localId
-            ? {
-                ...t,
-                path: res.relativePath || t.path,
-                title: res.filename || t.title,
-                isDirty: false,
-              }
-            : t
-        )
-      );
+
+      const shouldAutoClose =
+        pendingSaveThenCloseIdsRef.current.has(localId) && !hasNewerLocalEdits;
+
+      if (shouldAutoClose) {
+        pendingSaveThenCloseIdsRef.current.delete(localId);
+        setOpenTabs(prev => {
+          const nextTabs = prev.filter(t => t.fileId !== localId);
+          setActiveTabId(curr =>
+            curr === localId ? nextTabs[nextTabs.length - 1]?.fileId ?? null : curr
+          );
+          return nextTabs;
+        });
+      } else {
+        setOpenTabs(prev =>
+          prev.map(t =>
+            t.fileId === localId
+              ? {
+                  ...t,
+                  path: res.relativePath || t.path,
+                  title: res.filename || t.title,
+                  isDirty: hasNewerLocalEdits,
+                }
+              : t
+          )
+        );
+      }
+
       notify(`Saved ${res.filename || res.relativePath} to ${res.provider || cloudProvider}`);
     },
 
-    onFileSaveError: (_localId, error) => {
+    onFileSaveError: (localId, error) => {
+      pendingSaveThenCloseIdsRef.current.delete(localId);
       notify(`Save error: ${error}`);
     },
 
@@ -640,6 +684,11 @@ export default function App() {
     [openTabs, activeTabId]
   );
 
+  const saveAsTargetFile = useMemo(
+    () => files.find(f => f.id === saveAsTargetFileId && !f.isDirectory) || null,
+    [files, saveAsTargetFileId]
+  );
+
   const dirtyFilesCount = useMemo(
     () => files.filter(f => !f.isDirectory && f.isDirty).length,
     [files]
@@ -825,45 +874,154 @@ export default function App() {
     [readCloudFile]
   );
 
-  // Tab close
+  // Immediately close the given tab IDs, cleaning up untitled scratchpads & discarded cloud edits
+  const executeCloseTabs = useCallback(
+    (tabIdsToClose: string[], discardDirty = false) => {
+      if (tabIdsToClose.length === 0) return;
+      const closeSet = new Set(tabIdsToClose);
+
+      setOpenTabs(prev => {
+        const nextTabs = prev.filter(t => !closeSet.has(t.fileId));
+        setActiveTabId(curr => {
+          if (!curr || !closeSet.has(curr)) return curr;
+          if (nextTabs.length === 0) return null;
+          const closedIdx = prev.findIndex(t => t.fileId === curr);
+          const nextActive = nextTabs[Math.min(nextTabs.length - 1, Math.max(0, closedIdx - 1))];
+          return nextActive?.fileId ?? null;
+        });
+        return nextTabs;
+      });
+
+      setFiles(prev =>
+        prev.flatMap(f => {
+          if (!closeSet.has(f.id)) return [f];
+          if (f.isUntitled) {
+            delete latestContentByIdRef.current[f.id];
+            return [];
+          }
+          if (discardDirty && f.isDirty) {
+            delete latestContentByIdRef.current[f.id];
+            if (extensionStatus === 'connected') {
+              return [
+                {
+                  ...f,
+                  content: '',
+                  contentLoaded: false,
+                  isDirty: false,
+                  externalVersion: (f.externalVersion ?? 0) + 1,
+                },
+              ];
+            }
+            return [{ ...f, isDirty: false }];
+          }
+          return [f];
+        })
+      );
+    },
+    [extensionStatus]
+  );
+
+  // Tab close (checks for unsaved edits before closing file tabs)
   const handleCloseTab = useCallback(
     (fileId: string, e?: React.MouseEvent) => {
       e?.stopPropagation();
-      setOpenTabs(prev => {
-        const nextTabs = prev.filter(t => t.fileId !== fileId);
-        if (activeTabId === fileId) {
-          if (nextTabs.length > 0) {
-            const closedIdx = prev.findIndex(t => t.fileId === fileId);
-            const nextActive = nextTabs[Math.max(0, closedIdx - 1)];
-            setActiveTabId(nextActive.fileId);
-          } else {
-            setActiveTabId(null);
-          }
-        }
-        return nextTabs;
-      });
+      const targetFile = filesRef.current.find(f => f.id === fileId && !f.isDirectory);
+      if (targetFile?.isDirty) {
+        setPendingCloseRequest({
+          mode: 'single',
+          targetFileIds: [fileId],
+          dirtyFiles: [targetFile],
+        });
+        return;
+      }
+      executeCloseTabs([fileId], false);
     },
-    [activeTabId]
+    [executeCloseTabs]
   );
 
   const handleCloseAllTabs = useCallback(() => {
-    setOpenTabs([]);
-    setActiveTabId(null);
-  }, []);
+    const targetIds = openTabs.map(t => t.fileId);
+    if (targetIds.length === 0) return;
+    const targetSet = new Set(targetIds);
+    const dirtyFiles = filesRef.current.filter(
+      f => targetSet.has(f.id) && !f.isDirectory && f.isDirty
+    );
+    if (dirtyFiles.length > 0) {
+      setPendingCloseRequest({
+        mode: 'all',
+        targetFileIds: targetIds,
+        dirtyFiles,
+      });
+      return;
+    }
+    executeCloseTabs(targetIds, false);
+  }, [openTabs, executeCloseTabs]);
 
-  const handleCloseOtherTabs = useCallback((keepFileId: string) => {
-    setOpenTabs(prev => prev.filter(t => t.fileId === keepFileId));
-    setActiveTabId(keepFileId);
-  }, []);
+  const handleCloseOtherTabs = useCallback(
+    (keepFileId: string) => {
+      const targetIds = openTabs.filter(t => t.fileId !== keepFileId).map(t => t.fileId);
+      if (targetIds.length === 0) return;
+      const targetSet = new Set(targetIds);
+      const dirtyFiles = filesRef.current.filter(
+        f => targetSet.has(f.id) && !f.isDirectory && f.isDirty
+      );
+      if (dirtyFiles.length > 0) {
+        setPendingCloseRequest({
+          mode: 'others',
+          keepFileId,
+          targetFileIds: targetIds,
+          dirtyFiles,
+        });
+        return;
+      }
+      executeCloseTabs(targetIds, false);
+    },
+    [openTabs, executeCloseTabs]
+  );
 
   const handleSetPreviewMode = useCallback((fileId: string, mode: 'code' | 'split' | 'preview') => {
     setOpenTabs(prev => prev.map(t => (t.fileId === fileId ? { ...t, previewMode: mode } : t)));
   }, []);
 
+  // Create a standalone untitled scratchpad file (File -> New)
+  const handleNewFile = useCallback(() => {
+    const num = untitledCounterRef.current++;
+    const title = `Untitled-${num}`;
+    const newId = `untitled-${Date.now()}-${num}`;
+    const newFile: CloudFile = {
+      id: newId,
+      name: title,
+      path: title,
+      parentRelativePath: '',
+      content: '',
+      externalVersion: 1,
+      contentLoaded: true,
+      driveRoot: false,
+      isDirectory: false,
+      isUntitled: true,
+      cloudProvider: 'Local Scratchpad',
+      mimeType: 'text/plain',
+      contentType: 'text',
+      encoding: 'utf-8',
+      lastModified: new Date().toLocaleTimeString(),
+      isDirty: false,
+    };
+
+    latestContentByIdRef.current[newId] = '';
+    setFiles(prev => [...prev, newFile]);
+    setOpenTabs(prev => [
+      ...prev,
+      { fileId: newId, path: title, title, previewMode: 'code' },
+    ]);
+    setActiveTabId(newId);
+    notify(`New untitled file: ${title}`);
+  }, [notify]);
+
   // Content edits
   const handleContentChange = useCallback(
     (fileId: string, newContent: string) => {
       if (isReadOnly) return;
+      latestContentByIdRef.current[fileId] = newContent;
       setFiles(prev =>
         prev.map(f => (f.id === fileId ? { ...f, content: newContent, isDirty: true } : f))
       );
@@ -871,30 +1029,368 @@ export default function App() {
     [isReadOnly]
   );
 
-  // Save current file
-  const handleSaveCurrent = useCallback(() => {
-    if (!activeFile) return;
-    if (isReadOnly || !canSave) {
-      notify('Workspace is in read-only mode (saving disabled)');
-      return;
-    }
-    saveCloudFile(activeFile);
-  }, [activeFile, isReadOnly, canSave, saveCloudFile, notify]);
+  // Open Save As... modal for the active file or a specified file
+  const handleOpenSaveAs = useCallback(
+    (targetOverride?: CloudFile) => {
+      const target = targetOverride || activeFile;
+      if (!target) return;
+      if (target.isLoadingContent || target.contentLoaded === false) {
+        notify('Wait for file content to finish loading before saving.');
+        return;
+      }
+      setSaveAsTargetFileId(target.id);
+    },
+    [activeFile, notify]
+  );
 
-  // Save all dirty files
+  // Save current file (untitled files automatically route to Save As...)
+  const handleSaveCurrent = useCallback(
+    (targetOverride?: CloudFile) => {
+      const candidate = targetOverride || activeFile;
+      if (!candidate) return;
+      const latestRecord = filesRef.current.find(f => f.id === candidate.id) || candidate;
+
+      if (latestRecord.isLoadingContent || latestRecord.contentLoaded === false) {
+        notify('Wait for file content to finish loading before saving.');
+        return;
+      }
+
+      if (latestRecord.isUntitled) {
+        setSaveAsTargetFileId(latestRecord.id);
+        return;
+      }
+
+      if (isReadOnly || !canSave) {
+        notify('Workspace is in read-only mode (saving disabled)');
+        return;
+      }
+
+      const freshContent = latestContentByIdRef.current[latestRecord.id] ?? latestRecord.content;
+      saveCloudFile({ ...latestRecord, content: freshContent });
+    },
+    [activeFile, isReadOnly, canSave, saveCloudFile, notify]
+  );
+
+  // Save all dirty files (saving cloud-backed files immediately, and prompting Save As for untitled files)
   const handleSaveAll = useCallback(() => {
     if (isReadOnly || !canSave) {
       notify('Workspace is in read-only mode (saving disabled)');
       return;
     }
-    const dirtyFiles = files.filter(f => !f.isDirectory && f.isDirty);
-    if (dirtyFiles.length > 0) {
-      saveAllCloudFiles(dirtyFiles);
-      notify(`Saving ${dirtyFiles.length} files to ${cloudProvider}...`);
-    } else {
+    const dirtyCloudFiles = filesRef.current
+      .filter(f => !f.isDirectory && f.isDirty && !f.isUntitled)
+      .map(f => ({ ...f, content: latestContentByIdRef.current[f.id] ?? f.content }));
+    const firstDirtyUntitled = filesRef.current.find(
+      f => !f.isDirectory && f.isDirty && f.isUntitled
+    );
+
+    if (dirtyCloudFiles.length > 0) {
+      saveAllCloudFiles(dirtyCloudFiles);
+      notify(`Saving ${dirtyCloudFiles.length} file${dirtyCloudFiles.length === 1 ? '' : 's'}...`);
+    }
+
+    if (firstDirtyUntitled) {
+      setSaveAsTargetFileId(firstDirtyUntitled.id);
+    } else if (dirtyCloudFiles.length === 0) {
       notify('All files are up-to-date');
     }
-  }, [isReadOnly, canSave, files, saveAllCloudFiles, cloudProvider, notify]);
+  }, [isReadOnly, canSave, saveAllCloudFiles, notify]);
+
+  // Confirm actions from UnsavedChangesModal
+  const handleUnsavedDiscardAndClose = useCallback(() => {
+    if (!pendingCloseRequest) return;
+    const ids = pendingCloseRequest.targetFileIds;
+    setPendingCloseRequest(null);
+    executeCloseTabs(ids, true);
+  }, [pendingCloseRequest, executeCloseTabs]);
+
+  const handleUnsavedSaveAndClose = useCallback(() => {
+    if (!pendingCloseRequest) return;
+    const req = pendingCloseRequest;
+    setPendingCloseRequest(null);
+
+    const dirtyIds = new Set(req.dirtyFiles.map(f => f.id));
+    const cleanIds = req.targetFileIds.filter(id => !dirtyIds.has(id));
+    if (cleanIds.length > 0) {
+      executeCloseTabs(cleanIds, false);
+    }
+
+    const dirtyCloud = req.dirtyFiles
+      .filter(f => !f.isUntitled)
+      .map(f => ({ ...f, content: latestContentByIdRef.current[f.id] ?? f.content }));
+    const dirtyUntitled = req.dirtyFiles.filter(f => f.isUntitled);
+
+    dirtyCloud.forEach(f => pendingSaveThenCloseIdsRef.current.add(f.id));
+    dirtyUntitled.forEach(f => pendingSaveThenCloseIdsRef.current.add(f.id));
+
+    if (dirtyCloud.length > 0) {
+      if (extensionStatus !== 'connected' || isReadOnly || !canSave) {
+        dirtyCloud.forEach(f => pendingSaveThenCloseIdsRef.current.delete(f.id));
+        notify('Cannot save cloud files while disconnected or read-only.');
+      } else {
+        saveAllCloudFiles(dirtyCloud);
+      }
+    }
+
+    if (dirtyUntitled.length > 0) {
+      setActiveTabId(dirtyUntitled[0].id);
+      setSaveAsTargetFileId(dirtyUntitled[0].id);
+    }
+  }, [
+    pendingCloseRequest,
+    executeCloseTabs,
+    extensionStatus,
+    isReadOnly,
+    canSave,
+    saveAllCloudFiles,
+    notify,
+  ]);
+
+  // Helper: ensure missing directory nodes along a saved path exist in the Explorer tree
+  const ensureFolderNodesInTree = useCallback(
+    (
+      list: CloudFile[],
+      parentFolderPath: string,
+      targetProvider: CloudProvider,
+      driveRootFlag: boolean
+    ): CloudFile[] => {
+      const cleanParent = parentFolderPath.replace(/^\/+|\/+$/g, '');
+      if (!cleanParent) return list;
+      const parts = cleanParent.split('/').filter(Boolean);
+      const next = [...list];
+      let accum = '';
+      for (const part of parts) {
+        accum = accum ? `${accum}/${part}` : part;
+        const exists = next.some(
+          item =>
+            item.isDirectory &&
+            item.path === accum &&
+            (!item.cloudProvider || item.cloudProvider === targetProvider)
+        );
+        if (!exists) {
+          const parentOfFolder = accum.includes('/') ? accum.slice(0, accum.lastIndexOf('/')) : '';
+          next.push({
+            id: `dir-${targetProvider}-${accum}`,
+            name: part,
+            path: accum,
+            parentRelativePath: parentOfFolder,
+            content: '',
+            contentLoaded: true,
+            childrenLoaded: true,
+            driveRoot: driveRootFlag,
+            isDirectory: true,
+            cloudProvider: targetProvider,
+            lastModified: new Date().toLocaleTimeString(),
+          });
+        }
+      }
+      return next;
+    },
+    []
+  );
+
+  // Execute cloud save from SaveAsModal (promotes untitled files OR creates a second tab on Save As...)
+  const handleConfirmSaveToCloud = useCallback(
+    async ({
+      sourceFile,
+      provider,
+      driveRoot,
+      relativePath,
+      existingFileId,
+    }: SaveAsConfirmParams): Promise<boolean> => {
+      const freshContent = latestContentByIdRef.current[sourceFile.id] ?? sourceFile.content;
+      const isBinary = Boolean(sourceFile.isBinary);
+      let contentToSend = freshContent || '';
+      if (isBinary && !contentToSend && sourceFile.binaryUrl?.startsWith('data:')) {
+        const commaIdx = sourceFile.binaryUrl.indexOf(',');
+        if (commaIdx >= 0) {
+          contentToSend = sourceFile.binaryUrl.slice(commaIdx + 1);
+        }
+      }
+
+      const res = await saveAsCloudFile({
+        provider,
+        driveRoot,
+        relativePath,
+        existingFileId,
+        mimeType: inferMimeType(relativePath),
+        contentType: isBinary ? 'binary' : 'text',
+        encoding: isBinary ? 'base64' : 'utf-8',
+        content: contentToSend,
+      });
+
+      const resolvedProvider = res.provider || provider;
+      const resolvedPath = (res.relativePath || relativePath).replace(/^\/+|\/+$/g, '');
+      const resolvedName =
+        res.filename || resolvedPath.split('/').pop() || sourceFile.name;
+      const resolvedParent = resolvedPath.includes('/')
+        ? resolvedPath.slice(0, resolvedPath.lastIndexOf('/'))
+        : '';
+      const resolvedMime = inferMimeType(resolvedName);
+      const timeLabel = res.modifiedMs
+        ? new Date(res.modifiedMs).toLocaleTimeString()
+        : new Date().toLocaleTimeString();
+
+      const wasUntitled = Boolean(sourceFile.isUntitled);
+      const isSameExistingFile =
+        !wasUntitled &&
+        resolvedProvider === sourceFile.cloudProvider &&
+        resolvedPath === sourceFile.path;
+
+      if (wasUntitled || isSameExistingFile) {
+        setFiles(prev => {
+          const updated = prev.map(f =>
+            f.id === sourceFile.id
+              ? {
+                  ...f,
+                  isUntitled: false,
+                  cloudProvider: resolvedProvider,
+                  driveRoot,
+                  cloudFileId: res.fileId ?? f.cloudFileId,
+                  parentId: res.parentFolderId ?? f.parentId,
+                  parentRelativePath: resolvedParent,
+                  name: resolvedName,
+                  path: resolvedPath,
+                  mimeType: resolvedMime,
+                  content: freshContent,
+                  size: res.sizeBytes ?? f.size,
+                  modifiedMs: res.modifiedMs ?? Date.now(),
+                  lastModified: timeLabel,
+                  isDirty: false,
+                }
+              : f
+          );
+          return ensureFolderNodesInTree(updated, resolvedParent, resolvedProvider, driveRoot);
+        });
+
+        if (pendingSaveThenCloseIdsRef.current.has(sourceFile.id)) {
+          pendingSaveThenCloseIdsRef.current.delete(sourceFile.id);
+          executeCloseTabs([sourceFile.id], false);
+        } else {
+          setOpenTabs(prev =>
+            prev.map(t =>
+              t.fileId === sourceFile.id
+                ? { ...t, path: resolvedPath, title: resolvedName, isDirty: false }
+                : t
+            )
+          );
+        }
+
+        notify(`Saved ${resolvedPath} to ${resolvedProvider}`);
+        return true;
+      }
+
+      // Existing file Save As to a different filename/folder/drive -> add a second tab!
+      const newFileId = res.fileId
+        ? `${resolvedProvider}:${String(res.fileId)}`
+        : `h2-${resolvedProvider}-${resolvedPath}-${Date.now()}`;
+
+      let finalIdToActivate = newFileId;
+      setFiles(prev => {
+        const existingMatch = prev.find(
+          f =>
+            !f.isDirectory &&
+            !f.isUntitled &&
+            f.cloudProvider === resolvedProvider &&
+            f.path === resolvedPath
+        );
+        if (existingMatch) {
+          finalIdToActivate = existingMatch.id;
+        }
+
+        const nextList = existingMatch
+          ? prev.map(f =>
+              f.id === existingMatch.id
+                ? {
+                    ...f,
+                    cloudFileId: res.fileId ?? f.cloudFileId,
+                    parentId: res.parentFolderId ?? f.parentId,
+                    parentRelativePath: resolvedParent,
+                    name: resolvedName,
+                    path: resolvedPath,
+                    mimeType: resolvedMime,
+                    content: freshContent,
+                    contentLoaded: true,
+                    externalVersion: (f.externalVersion ?? 0) + 1,
+                    size: res.sizeBytes ?? f.size,
+                    modifiedMs: res.modifiedMs ?? Date.now(),
+                    lastModified: timeLabel,
+                    isDirty: false,
+                  }
+                : f
+            )
+          : [
+              ...prev,
+              {
+                id: newFileId,
+                cloudFileId: res.fileId,
+                parentId: res.parentFolderId,
+                parentRelativePath: resolvedParent,
+                name: resolvedName,
+                path: resolvedPath,
+                content: freshContent,
+                externalVersion: 1,
+                contentLoaded: true,
+                driveRoot,
+                isDirectory: false,
+                isUntitled: false,
+                cloudProvider: resolvedProvider,
+                mimeType: resolvedMime,
+                contentType: isBinary ? ('binary' as const) : ('text' as const),
+                encoding: isBinary ? ('base64' as const) : ('utf-8' as const),
+                size: res.sizeBytes,
+                modifiedMs: res.modifiedMs ?? Date.now(),
+                lastModified: timeLabel,
+                isDirty: false,
+              },
+            ];
+
+        latestContentByIdRef.current[existingMatch ? existingMatch.id : newFileId] = freshContent;
+        return ensureFolderNodesInTree(nextList, resolvedParent, resolvedProvider, driveRoot);
+      });
+
+      setOpenTabs(prev => {
+        const alreadyOpen = prev.some(t => t.fileId === finalIdToActivate);
+        if (alreadyOpen) {
+          return prev.map(t =>
+            t.fileId === finalIdToActivate
+              ? { ...t, path: resolvedPath, title: resolvedName, isDirty: false }
+              : t
+          );
+        }
+        return [
+          ...prev,
+          {
+            fileId: finalIdToActivate,
+            path: resolvedPath,
+            title: resolvedName,
+            previewMode: 'split',
+          },
+        ];
+      });
+      setActiveTabId(finalIdToActivate);
+      notify(`Saved copy as ${resolvedPath} (${resolvedProvider})`);
+      return true;
+    },
+    [saveAsCloudFile, ensureFolderNodesInTree, executeCloseTabs, notify]
+  );
+
+  // Local download fallback inside SaveAsModal when offline or read-only
+  const handleDownloadLocalFallback = useCallback(
+    (sourceFile: CloudFile, downloadFilename: string) => {
+      const freshContent = latestContentByIdRef.current[sourceFile.id] ?? sourceFile.content;
+      const mime = inferMimeType(downloadFilename);
+      const blob = new Blob([freshContent], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = downloadFilename;
+      link.click();
+      URL.revokeObjectURL(url);
+      notify(`Downloaded ${downloadFilename} to computer`);
+    },
+    [notify]
+  );
 
   // Create new file
   const handleCreateFile = useCallback(
@@ -1536,18 +2032,60 @@ export default function App() {
     [updateSettings]
   );
 
-  // Global keybindings (capture phase ensures F1 and Ctrl+Shift+P work even when Monaco Editor has focus)
+  // Global keybindings (capture phase prevents double-firing with Monaco Editor)
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      const isCmdOrCtrl = e.metaKey || e.ctrlKey;
+      const hasBlockingModal = Boolean(
+        isPaletteOpen ||
+          isSearchOpen ||
+          isShortcutsOpen ||
+          isAboutOpen ||
+          isExportPrefsOpen ||
+          isImportPrefsOpen ||
+          saveAsTargetFileId ||
+          pendingCloseRequest
+      );
 
-      if (isCmdOrCtrl && !e.shiftKey && e.key.toLowerCase() === 's') {
+      if (hasBlockingModal) {
+        return;
+      }
+
+      const isCmdOrCtrl = e.metaKey || e.ctrlKey;
+      const isKeyN = e.code === 'KeyN' || e.key.toLowerCase() === 'n';
+      const isKeyS = e.code === 'KeyS' || e.key.toLowerCase() === 's';
+      const isKeyP = e.code === 'KeyP' || e.key.toLowerCase() === 'p';
+
+      // New File: Alt+N (reliable everywhere) or Ctrl+N (works in installed app windows)
+      if (
+        (e.altKey && !isCmdOrCtrl && !e.shiftKey && isKeyN) ||
+        (isCmdOrCtrl && !e.shiftKey && !e.altKey && isKeyN)
+      ) {
         e.preventDefault();
+        e.stopPropagation();
+        handleNewFile();
+        return;
+      }
+
+      // Save As...: Ctrl+Shift+S or Ctrl+Alt+N
+      if (
+        (isCmdOrCtrl && e.shiftKey && !e.altKey && isKeyS) ||
+        (isCmdOrCtrl && e.altKey && !e.shiftKey && isKeyN)
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        handleOpenSaveAs();
+        return;
+      }
+
+      // Save: Ctrl+S (routes untitled files to Save As...)
+      if (isCmdOrCtrl && !e.shiftKey && !e.altKey && isKeyS) {
+        e.preventDefault();
+        e.stopPropagation();
         handleSaveCurrent();
         return;
       }
 
-      if (isCmdOrCtrl && e.shiftKey && e.key.toLowerCase() === 'p') {
+      if (isCmdOrCtrl && e.shiftKey && isKeyP) {
         e.preventDefault();
         e.stopPropagation();
         openCommandPalette();
@@ -1561,14 +2099,16 @@ export default function App() {
         return;
       }
 
-      if (isCmdOrCtrl && !e.shiftKey && e.key.toLowerCase() === 'p') {
+      if (isCmdOrCtrl && !e.shiftKey && !e.altKey && isKeyP) {
         e.preventDefault();
+        e.stopPropagation();
         openQuickOpen();
         return;
       }
 
       if (isCmdOrCtrl && e.shiftKey && e.key.toLowerCase() === 'f') {
         e.preventDefault();
+        e.stopPropagation();
         setIsSearchOpen(true);
         return;
       }
@@ -1587,18 +2127,13 @@ export default function App() {
 
       if (isCmdOrCtrl && !e.shiftKey && e.key.toLowerCase() === 'w' && activeTabId) {
         e.preventDefault();
+        e.stopPropagation();
         handleCloseTab(activeTabId);
         return;
       }
 
       if (
         e.key === 'Escape' &&
-        !isPaletteOpen &&
-        !isSearchOpen &&
-        !isShortcutsOpen &&
-        !isAboutOpen &&
-        !isExportPrefsOpen &&
-        !isImportPrefsOpen &&
         (activeTabId === BRIDGE_STATUS_TAB_ID ||
           activeTabId === BRIDGE_DEBUGGER_TAB_ID ||
           activeTabId === PREFERENCES_TAB_ID)
@@ -1611,6 +2146,8 @@ export default function App() {
     window.addEventListener('keydown', handleGlobalKeyDown, true);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown, true);
   }, [
+    handleNewFile,
+    handleOpenSaveAs,
     handleSaveCurrent,
     openCommandPalette,
     openQuickOpen,
@@ -1625,11 +2162,20 @@ export default function App() {
     isAboutOpen,
     isExportPrefsOpen,
     isImportPrefsOpen,
+    saveAsTargetFileId,
+    pendingCloseRequest,
   ]);
 
   // Unified IDE Command list for Command Palette (Ctrl+Shift+P / F1 / >)
   const ideCommands = useMemo<IdeCommand[]>(
     () => [
+      {
+        id: 'file.new',
+        category: 'File',
+        label: 'New File',
+        shortcut: 'Ctrl+N / Alt+N',
+        action: handleNewFile,
+      },
       {
         id: 'file.quickOpen',
         category: 'File',
@@ -1642,8 +2188,25 @@ export default function App() {
         category: 'File',
         label: 'Save Active File',
         shortcut: 'Ctrl+S',
-        disabled: !activeFile || isSaving || isReadOnly || !canSave,
-        action: handleSaveCurrent,
+        disabled:
+          !activeFile ||
+          activeFile.isLoadingContent ||
+          activeFile.contentLoaded === false ||
+          isSaving ||
+          (!activeFile.isUntitled && (isReadOnly || !canSave)),
+        action: () => handleSaveCurrent(),
+      },
+      {
+        id: 'file.saveAs',
+        category: 'File',
+        label: 'Save As...',
+        shortcut: 'Ctrl+Shift+S',
+        disabled:
+          !activeFile ||
+          activeFile.isLoadingContent ||
+          activeFile.contentLoaded === false ||
+          isSaving,
+        action: () => handleOpenSaveAs(),
       },
       {
         id: 'file.saveAll',
@@ -1809,12 +2372,14 @@ export default function App() {
       },
     ],
     [
+      handleNewFile,
       openQuickOpen,
       activeFile,
       isSaving,
       isReadOnly,
       canSave,
       handleSaveCurrent,
+      handleOpenSaveAs,
       dirtyFilesCount,
       handleSaveAll,
       activeTabId,
@@ -1846,6 +2411,8 @@ export default function App() {
       <MenuBar
         workspaceName={workspaceName}
         hasActiveFile={Boolean(activeFile)}
+        isActiveFileUntitled={Boolean(activeFile?.isUntitled)}
+        isActiveFileLoaded={Boolean(activeFile && activeFile.contentLoaded !== false && !activeFile.isLoadingContent)}
         dirtyFilesCount={dirtyFilesCount}
         isSaving={isSaving}
         isReadOnly={isReadOnly}
@@ -1854,8 +2421,10 @@ export default function App() {
         wordWrap={wordWrap}
         minimap={minimap}
         onOpenCommandPalette={openCommandPalette}
+        onNewFile={handleNewFile}
         onOpenQuickOpen={openQuickOpen}
-        onSaveCurrent={handleSaveCurrent}
+        onSaveCurrent={() => handleSaveCurrent()}
+        onSaveAs={() => handleOpenSaveAs()}
         onSaveAll={handleSaveAll}
         onOpenPreferences={handleOpenPreferences}
         onToggleSidebar={() => updateSettings({ sidebarOpen: !isSidebarOpen })}
@@ -2043,7 +2612,9 @@ export default function App() {
                 }
                 onLoadSampleWorkspace={handleLoadSampleWorkspace}
                 onContentChange={handleContentChange}
-                onSaveFile={saveCloudFile}
+                onSaveFile={handleSaveCurrent}
+                onSaveAsFile={handleOpenSaveAs}
+                onNewFile={handleNewFile}
                 onRetryLoadFile={handleRetryLoadFile}
                 onCursorChange={handleCursorChange}
                 onOpenQuickOpen={openQuickOpen}
@@ -2127,6 +2698,42 @@ export default function App() {
         onImportPreferences={importSettingsFromJson}
         onImportSuccess={notify}
         onClose={() => setIsImportPrefsOpen(false)}
+      />
+      {/* Save / Save As Cloud Destination Modal */}
+      <SaveAsModal
+        isOpen={Boolean(saveAsTargetFile)}
+        targetFile={saveAsTargetFile}
+        files={files}
+        isBridgeConnected={extensionStatus === 'connected'}
+        isReadOnly={isReadOnly}
+        canSave={canSave}
+        canCreateFolders={canCreateFolders}
+        availableDrives={connectedDrives}
+        defaultDrive={
+          selectedDrive && selectedDrive !== 'all'
+            ? selectedDrive
+            : cloudProvider !== 'all' && cloudProvider !== 'Standalone'
+              ? cloudProvider
+              : connectedDrives[0] || 'pcloud'
+        }
+        listDriveEntries={listDriveEntries}
+        createRawCloudFolder={createRawCloudFolder}
+        onConfirmSaveToCloud={handleConfirmSaveToCloud}
+        onDownloadLocalFallback={handleDownloadLocalFallback}
+        onClose={() => {
+          if (saveAsTargetFile) {
+            pendingSaveThenCloseIdsRef.current.delete(saveAsTargetFile.id);
+          }
+          setSaveAsTargetFileId(null);
+        }}
+      />
+
+      {/* Unsaved Changes Confirmation Modal when Closing Dirty Tabs */}
+      <UnsavedChangesModal
+        request={pendingCloseRequest}
+        onSaveAndClose={handleUnsavedSaveAndClose}
+        onDiscardAndClose={handleUnsavedDiscardAndClose}
+        onCancel={() => setPendingCloseRequest(null)}
       />
     </div>
   );

@@ -88,6 +88,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
     return files.filter(
       f =>
         !f.isDirectory &&
+        !f.isUntitled &&
         (!searchTerm ||
           f.path.toLowerCase().includes(searchTerm) ||
           f.name.toLowerCase().includes(searchTerm))

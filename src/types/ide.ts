@@ -1,5 +1,5 @@
 /**
- * Core TypeScript definitions for Monarch IDE & Clockie H2 Bridge Protocol v1.3 (H2_CLOUD_BRIDGE).
+ * Core TypeScript definitions for Monarch IDE & Clockie H2 Bridge Protocol v1.4 (H2_CLOUD_BRIDGE).
  * Zero-URL session binding via per-tab sessionStorage and unified H2_CONNECT_REQ/RES startup.
  *
  * Official Documentation:
@@ -60,12 +60,16 @@ export interface CloudFile {
   parentId?: string;
   /** Parent folder relative path (e.g. "src" or "") */
   parentRelativePath?: string;
-  /** File or folder name (e.g. "index.ts") */
+  /** File or folder name (e.g. "index.ts" or "Untitled-1") */
   name: string;
   /** Relative path within workspace/drive root (e.g. "src/index.ts") */
   path: string;
   /** Text content or base64 content */
   content: string;
+  /** Monotonic counter bumped only when content arrives from an external source (not local typing) */
+  externalVersion?: number;
+  /** True when created via File -> New and not yet saved to any cloud drive */
+  isUntitled?: boolean;
   /** True when H2_WORKSPACE_TREE metadata has been hydrated with file content via H2_READ_FILE_RES */
   contentLoaded?: boolean;
   /** True while an H2_READ_FILE_REQ is currently in flight */

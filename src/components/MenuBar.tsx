@@ -23,6 +23,8 @@ import {
   Map as MapIcon,
   BookOpen,
   Info,
+  FilePlus,
+  SaveAll,
 } from 'lucide-react';
 
 type TopMenuKey = 'file' | 'edit' | 'view' | 'bridge' | 'help';
@@ -30,6 +32,8 @@ type TopMenuKey = 'file' | 'edit' | 'view' | 'bridge' | 'help';
 interface MenuBarProps {
   workspaceName: string;
   hasActiveFile: boolean;
+  isActiveFileUntitled: boolean;
+  isActiveFileLoaded: boolean;
   dirtyFilesCount: number;
   isSaving: boolean;
   isReadOnly: boolean;
@@ -38,8 +42,10 @@ interface MenuBarProps {
   wordWrap: boolean;
   minimap: boolean;
   onOpenCommandPalette: () => void;
+  onNewFile: () => void;
   onOpenQuickOpen: () => void;
   onSaveCurrent: () => void;
+  onSaveAs: () => void;
   onSaveAll: () => void;
   onOpenPreferences: () => void;
   onToggleSidebar: () => void;
@@ -55,6 +61,8 @@ interface MenuBarProps {
 export const MenuBar: React.FC<MenuBarProps> = ({
   workspaceName,
   hasActiveFile,
+  isActiveFileUntitled,
+  isActiveFileLoaded,
   dirtyFilesCount,
   isSaving,
   isReadOnly,
@@ -63,8 +71,10 @@ export const MenuBar: React.FC<MenuBarProps> = ({
   wordWrap,
   minimap,
   onOpenCommandPalette,
+  onNewFile,
   onOpenQuickOpen,
   onSaveCurrent,
+  onSaveAs,
   onSaveAll,
   onOpenPreferences,
   onToggleSidebar,
@@ -111,7 +121,12 @@ export const MenuBar: React.FC<MenuBarProps> = ({
     }
   };
 
-  const canSaveCurrentFile = hasActiveFile && !isSaving && !isReadOnly && canSave;
+  const canSaveCurrentFile =
+    hasActiveFile &&
+    isActiveFileLoaded &&
+    !isSaving &&
+    (isActiveFileUntitled || (!isReadOnly && canSave));
+  const canSaveAsCurrentFile = hasActiveFile && isActiveFileLoaded && !isSaving;
   const canSaveAllFiles = dirtyFilesCount > 0 && !isSaving && !isReadOnly && canSave;
 
   const menuButtonClass = (key: TopMenuKey) =>
@@ -140,7 +155,24 @@ export const MenuBar: React.FC<MenuBarProps> = ({
           </button>
 
           {openMenu === 'file' && (
-            <div className="absolute left-0 top-full mt-0.5 w-60 rounded-md border border-slate-200 dark:border-zinc-700 bg-white dark:bg-[#1f1f23] shadow-xl py-1 z-50">
+            <div className="absolute left-0 top-full mt-0.5 w-64 rounded-md border border-slate-200 dark:border-zinc-700 bg-white dark:bg-[#1f1f23] shadow-xl py-1 z-50">
+              <button
+                type="button"
+                onClick={() => {
+                  setOpenMenu(null);
+                  onNewFile();
+                }}
+                className="w-full px-3 py-1.5 text-left flex items-center justify-between hover:bg-blue-50 dark:hover:bg-blue-950/60 hover:text-blue-700 dark:hover:text-blue-300 text-xs transition"
+              >
+                <span className="flex items-center gap-2">
+                  <FilePlus className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                  <span>New File</span>
+                </span>
+                <kbd className="text-[10px] font-mono text-slate-400 dark:text-zinc-500">
+                  Ctrl+N / Alt+N
+                </kbd>
+              </button>
+
               <button
                 type="button"
                 onClick={() => {
@@ -172,6 +204,24 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                   <span>{isSaving ? 'Saving...' : 'Save'}</span>
                 </span>
                 <kbd className="text-[10px] font-mono text-slate-400 dark:text-zinc-500">Ctrl+S</kbd>
+              </button>
+
+              <button
+                type="button"
+                disabled={!canSaveAsCurrentFile}
+                onClick={() => {
+                  setOpenMenu(null);
+                  onSaveAs();
+                }}
+                className="w-full px-3 py-1.5 text-left flex items-center justify-between hover:bg-blue-50 dark:hover:bg-blue-950/60 hover:text-blue-700 dark:hover:text-blue-300 text-xs transition disabled:opacity-40 disabled:pointer-events-none"
+              >
+                <span className="flex items-center gap-2">
+                  <SaveAll className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                  <span>Save As...</span>
+                </span>
+                <kbd className="text-[10px] font-mono text-slate-400 dark:text-zinc-500">
+                  Ctrl+Shift+S
+                </kbd>
               </button>
 
               <button

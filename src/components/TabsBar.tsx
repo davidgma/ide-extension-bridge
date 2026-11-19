@@ -101,6 +101,8 @@ export const TabsBar: React.FC<TabsBarProps> = ({
               title={
                 isVirtual
                   ? tab.title
+                  : file?.isUntitled
+                  ? `${tab.title} (Unsaved scratchpad — use Save or Save As...)`
                   : `${tab.path} ${isDirty ? '(Unsaved Changes)' : ''}`
               }
               className={`group relative h-full flex items-center gap-2 px-3 border-r border-slate-200 dark:border-zinc-800/80 cursor-pointer text-xs transition-colors shrink-0 ${
@@ -121,7 +123,7 @@ export const TabsBar: React.FC<TabsBarProps> = ({
               <span
                 className={`truncate max-w-[190px] text-[11.5px] ${
                   isVirtual ? 'font-sans' : 'font-mono'
-                }`}
+                } ${file?.isUntitled ? 'italic text-blue-700 dark:text-blue-300' : ''}`}
               >
                 {tab.title}
               </span>
@@ -140,7 +142,7 @@ export const TabsBar: React.FC<TabsBarProps> = ({
                   className={`p-0.5 rounded hover:bg-slate-200 dark:hover:bg-zinc-700/80 hover:text-slate-900 dark:hover:text-white text-slate-400 dark:text-zinc-400 transition ${
                     isDirty ? 'hidden group-hover:block' : 'opacity-60 group-hover:opacity-100'
                   }`}
-                  title="Close tab (Cmd+W)"
+                  title="Close tab (Ctrl+W)"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
