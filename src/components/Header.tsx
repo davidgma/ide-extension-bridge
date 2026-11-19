@@ -20,19 +20,14 @@ import {
   HardDrive,
   Check,
   RotateCw,
-  Play,
-  Plug,
   Radio,
   Lock,
 } from 'lucide-react';
-import { CloudFile, EditorTheme, ExtensionStatus, ExtensionHandshakeInfo } from '../types/ide';
+import { CloudFile, EditorTheme } from '../types/ide';
 
 interface HeaderProps {
   activeFile: CloudFile | null;
   files: CloudFile[];
-  sessionId: string | null;
-  extensionStatus: ExtensionStatus;
-  handshakeInfo: ExtensionHandshakeInfo | null;
   isSaving: boolean;
   isReadOnly: boolean;
   canSave: boolean;
@@ -41,56 +36,41 @@ interface HeaderProps {
   minimap: boolean;
   lineCount: number;
   charCount: number;
-  isRunningCode: boolean;
   onThemeChange: (theme: EditorTheme) => void;
   onToggleWordWrap: () => void;
   onToggleMinimap: () => void;
   onSaveCurrent: () => void;
   onSaveAll: () => void;
-  onStartBridge: () => void;
-  onStopBridge: () => void;
-  onRunCode: () => void;
   onOpenQuickOpen: () => void;
   onOpenSearch: () => void;
-  onOpenBridgeModal: () => void;
   onOpenShortcutsModal: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   activeFile,
   files,
-  sessionId,
-  extensionStatus,
-  handshakeInfo,
   isSaving,
   isReadOnly,
   canSave,
   activeTheme,
   lineCount,
   charCount,
-  isRunningCode,
   onThemeChange,
   onSaveCurrent,
   onSaveAll,
-  onStartBridge,
-  onStopBridge,
-  onRunCode,
   onOpenQuickOpen,
   onOpenSearch,
-  onOpenBridgeModal,
   onOpenShortcutsModal,
 }) => {
   const nonDirFiles = files.filter(f => !f.isDirectory);
   const dirtyFilesCount = nonDirFiles.filter(f => f.isDirty).length;
   const isCurrentDirty = activeFile?.isDirty;
-  const providerLabel = handshakeInfo?.provider || 'cloud';
-  const modeLabel = handshakeInfo?.sessionMode || 'direct';
 
   return (
-    <header className="h-12 bg-white dark:bg-[#18181b] border-b border-slate-200 dark:border-zinc-800 flex items-center justify-between px-3 text-xs select-auto shadow-sm dark:shadow-md z-30">
-      {/* Left Brand & Extension Bridge Controls */}
+    <header className="h-12 bg-white dark:bg-[#18181b] border-b border-slate-200 dark:border-zinc-800 flex items-center justify-between px-3 text-xs select-auto shadow-sm dark:shadow-md z-30 shrink-0">
+      {/* Left Brand */}
       <div className="flex items-center gap-3">
-        <div className="flex items-center gap-2 group cursor-pointer" onClick={onOpenBridgeModal}>
+        <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-emerald-500 to-blue-600 flex items-center justify-center shadow-md shadow-emerald-900/20">
             <Radio className="w-4 h-4 text-white" />
           </div>
@@ -116,64 +96,6 @@ export const Header: React.FC<HeaderProps> = ({
           <span>ide.freshfood.rocks</span>
           <ExternalLink className="w-3 h-3 opacity-60" />
         </a>
-
-        <div className="h-4 w-px bg-slate-200 dark:bg-zinc-800 hidden md:block" />
-
-        {/* H2 Bridge Connection Controls */}
-        <div className="flex items-center bg-slate-100 dark:bg-zinc-900 border border-slate-300 dark:border-zinc-700/80 rounded-full p-0.5">
-          {extensionStatus === 'connected' ? (
-            <div className="flex items-center gap-2 pl-2.5 pr-1 py-0.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 dark:bg-emerald-400" />
-              <span className="text-emerald-700 dark:text-emerald-300 font-medium text-[11px] hidden sm:inline">
-                H2 v1.3 {modeLabel} ({providerLabel})
-              </span>
-              {isReadOnly && (
-                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-red-100 dark:bg-red-950/80 text-red-700 dark:text-red-300 border border-red-300 dark:border-red-700/60 text-[10px]">
-                  <Lock className="w-2.5 h-2.5" />
-                  Read-Only
-                </span>
-              )}
-              <button
-                onClick={onStopBridge}
-                className="px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-950/80 hover:bg-red-200 dark:hover:bg-red-900 text-red-700 dark:text-red-300 border border-red-300 dark:border-red-800 text-[10px] font-semibold transition"
-                title="Send H2_DISCONNECT_REQ and disconnect"
-              >
-                Disconnect
-              </button>
-            </div>
-          ) : extensionStatus === 'connecting' ? (
-            <div className="flex items-center gap-2 pl-2.5 pr-1 py-0.5">
-              <span className="w-2 h-2 rounded-full bg-blue-500 dark:bg-blue-400 animate-pulse" />
-              <span className="text-blue-700 dark:text-blue-300 font-medium text-[11px]">
-                Connecting...
-              </span>
-              <button
-                onClick={onStopBridge}
-                className="px-2 py-0.5 rounded-full bg-slate-200 dark:bg-zinc-800 hover:bg-slate-300 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 text-[10px] transition"
-                title="Cancel connecting"
-              >
-                Cancel
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={onStartBridge}
-              className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium bg-white dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-800 dark:text-zinc-200 hover:text-slate-950 dark:hover:text-white transition shadow-2xs"
-              title="Connect to Clockie H2 Extension (H2_CONNECT_REQ v1.3)"
-            >
-              <Plug className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-              <span>Connect H2 Bridge</span>
-            </button>
-          )}
-
-          <button
-            onClick={onOpenBridgeModal}
-            className="p-1 rounded-full hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white transition mr-0.5"
-            title="Extension Bridge Inspector & Protocol v1.3"
-          >
-            <Radio className="w-3 h-3" />
-          </button>
-        </div>
       </div>
 
       {/* Middle Active File Metadata */}
@@ -215,17 +137,8 @@ export const Header: React.FC<HeaderProps> = ({
         )}
       </div>
 
-      {/* Right Controls & Run/Save Actions */}
+      {/* Right Controls & Save Actions */}
       <div className="flex items-center gap-2">
-        <button
-          onClick={onRunCode}
-          disabled={!activeFile || activeFile.isBinary || isRunningCode}
-          className="flex items-center gap-1.5 px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition disabled:opacity-50"
-          title="Run active file in Output Console"
-        >
-          <Play className="w-3.5 h-3.5 fill-white" />
-          <span>Run</span>
-        </button>
 
         <button
           onClick={onOpenQuickOpen}

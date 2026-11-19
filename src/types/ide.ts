@@ -96,10 +96,16 @@ export interface FileTreeNode {
   file?: CloudFile;
 }
 
+export const BRIDGE_STATUS_TAB_ID = '__bridge_status__' as const;
+export const BRIDGE_DEBUGGER_TAB_ID = '__bridge_debugger__' as const;
+
+export type OpenTabKind = 'file' | 'bridge-status' | 'bridge-debugger';
+
 export interface OpenTab {
   fileId: string;
   path: string;
   title: string;
+  kind?: OpenTabKind;
   isDirty?: boolean;
   previewMode?: 'code' | 'preview' | 'split';
 }

@@ -1,8 +1,8 @@
 /**
- * Extension Bridge Debugger Drawer for Clockie H2 Bridge Protocol v1.3 (H2_CLOUD_BRIDGE).
- * Displays live outgoing/incoming message packets, requestId correlation, per-tab sessionStorage ID,
- * sessionMode (launched/direct), launchedScope, driveRoot, accessMode, connected drives,
- * negotiated capabilities, and window.postMessage target diagnostics.
+ * Full-Page Extension Bridge Debugger Editor Tab View (Step 2).
+ * Replaces the old bottom ExtensionDebugger drawer with a full-bleed editor tab
+ * displaying live outgoing/incoming message packets, requestId correlation,
+ * per-tab sessionStorage ID, sessionMode, launchedScope, drives, and capabilities.
  *
  * Official Documentation:
  * - Window.postMessage: https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage
@@ -27,8 +27,7 @@ import {
 import { BridgeMessage, ExtensionStatus, ExtensionHandshakeInfo } from '../types/ide';
 import { H2_SESSION_STORAGE_KEY } from '../utils/h2BridgeClient';
 
-interface ExtensionDebuggerProps {
-  isOpen: boolean;
+interface ExtensionDebuggerPageProps {
   sessionId: string | null;
   messagesLog: BridgeMessage[];
   extensionStatus: ExtensionStatus;
@@ -40,8 +39,7 @@ interface ExtensionDebuggerProps {
   onConnectBridge: () => void;
 }
 
-export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
-  isOpen,
+export const ExtensionDebuggerPage: React.FC<ExtensionDebuggerPageProps> = ({
   sessionId,
   messagesLog,
   extensionStatus,
@@ -57,9 +55,6 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [isLogCopied, setIsLogCopied] = useState(false);
   const [showTargetDetails, setShowTargetDetails] = useState(true);
-  const [height, setHeight] = useState(340);
-
-  if (!isOpen) return null;
 
   const currentUrl = typeof window !== 'undefined' ? window.location.href : 'https://ide.freshfood.rocks/';
   const currentOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://ide.freshfood.rocks';
@@ -68,26 +63,6 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
     typeof window !== 'undefined'
       ? window.location.port || (window.location.protocol === 'https:' ? '443' : '80')
       : '443';
-
-  const handleMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault();
-    const startY = e.clientY;
-    const startHeight = height;
-
-    const handleMouseMove = (moveEvent: MouseEvent) => {
-      const deltaY = startY - moveEvent.clientY;
-      const newHeight = Math.max(160, Math.min(window.innerHeight * 0.88, startHeight + deltaY));
-      setHeight(newHeight);
-    };
-
-    const handleMouseUp = () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
-
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-  };
 
   const toggleExpand = (id: string) => {
     setExpandedIds(prev => ({ ...prev, [id]: !prev[id] }));
@@ -150,26 +125,14 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
   });
 
   return (
-    <div
-      className="bg-slate-50 dark:bg-[#121214] border-t-2 border-emerald-500/80 flex flex-col font-mono text-xs select-auto shadow-2xl z-40 relative"
-      style={{ height: `${height}px` }}
-    >
-      {/* Resizable Top Border Handle */}
-      <div
-        onMouseDown={handleMouseDown}
-        className="h-2 w-full bg-emerald-500/40 dark:bg-emerald-500/50 hover:bg-emerald-500 dark:hover:bg-emerald-400 cursor-ns-resize transition-colors flex items-center justify-center shrink-0 group"
-        title="Drag up or down to resize Extension Bridge Debugger"
-      >
-        <div className="w-14 h-1 bg-emerald-700/70 dark:bg-emerald-300/80 rounded-full group-hover:bg-white transition-colors" />
-      </div>
-
+    <div className="h-full w-full flex flex-col bg-slate-50 dark:bg-[#121214] font-mono text-xs select-auto overflow-hidden">
       {/* Top Header Bar */}
-      <div className="flex flex-wrap items-center justify-between px-3 py-1.5 bg-slate-100 dark:bg-[#1a1a1e] border-b border-slate-200 dark:border-zinc-800 select-auto gap-2 shrink-0">
+      <div className="flex flex-wrap items-center justify-between px-4 py-2.5 bg-slate-100 dark:bg-[#1a1a1e] border-b border-slate-200 dark:border-zinc-800 select-auto gap-2 shrink-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="p-1 rounded bg-emerald-100 dark:bg-emerald-950 border border-emerald-500/40 text-emerald-700 dark:text-emerald-400">
-            <Bug className="w-3.5 h-3.5" />
+          <div className="p-1.5 rounded bg-emerald-100 dark:bg-emerald-950 border border-emerald-500/40 text-emerald-700 dark:text-emerald-400">
+            <Bug className="w-4 h-4" />
           </div>
-          <span className="font-bold text-slate-900 dark:text-white text-xs tracking-tight">
+          <span className="font-bold text-slate-900 dark:text-white text-sm tracking-tight font-sans">
             Extension Bridge Debugger (v1.3)
           </span>
 
@@ -205,10 +168,11 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
           </div>
 
           <button
+            type="button"
             onClick={() => setShowTargetDetails(!showTargetDetails)}
             className={`px-2 py-0.5 rounded text-[10px] border transition flex items-center gap-1 ${
               showTargetDetails
-                ? 'bg-white dark:bg-zinc-800 text-emerald-700 dark:text-emerald-300 border-emerald-500/40 shadow-xs'
+                ? 'bg-white dark:bg-zinc-800 text-emerald-700 dark:text-emerald-300 border-emerald-500/40 shadow-2xs'
                 : 'bg-slate-200/70 dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 border-slate-300 dark:border-zinc-800'
             }`}
           >
@@ -220,52 +184,68 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
         {/* Filters */}
         <div className="flex items-center gap-1 bg-white dark:bg-zinc-900/90 rounded border border-slate-200 dark:border-zinc-800 p-0.5">
           <button
+            type="button"
             onClick={() => setFilter('all')}
             className={`px-2 py-0.5 rounded text-[10px] transition ${
-              filter === 'all' ? 'bg-emerald-600 text-white font-bold' : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+              filter === 'all'
+                ? 'bg-emerald-600 text-white font-bold'
+                : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
             All ({messagesLog.length})
           </button>
           <button
+            type="button"
             onClick={() => setFilter('outgoing')}
             className={`px-2 py-0.5 rounded text-[10px] transition ${
-              filter === 'outgoing' ? 'bg-blue-600 text-white font-bold' : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+              filter === 'outgoing'
+                ? 'bg-blue-600 text-white font-bold'
+                : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
             Outgoing ↗
           </button>
           <button
+            type="button"
             onClick={() => setFilter('incoming')}
             className={`px-2 py-0.5 rounded text-[10px] transition ${
-              filter === 'incoming' ? 'bg-emerald-600 text-white font-bold' : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+              filter === 'incoming'
+                ? 'bg-emerald-600 text-white font-bold'
+                : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
             Incoming ↙
           </button>
           <button
+            type="button"
             onClick={() => setFilter('fileOps')}
             className={`px-2 py-0.5 rounded text-[10px] transition ${
-              filter === 'fileOps' ? 'bg-emerald-600 text-white font-bold' : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+              filter === 'fileOps'
+                ? 'bg-emerald-600 text-white font-bold'
+                : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
             Tree / File Ops
           </button>
           <button
+            type="button"
             onClick={() => setFilter('errors')}
             className={`px-2 py-0.5 rounded text-[10px] transition ${
-              filter === 'errors' ? 'bg-red-600 text-white font-bold' : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+              filter === 'errors'
+                ? 'bg-red-600 text-white font-bold'
+                : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
             Errors
           </button>
         </div>
 
-        {/* Action Controls */}
+        {/* Action Controls + Close Button */}
         <div className="flex items-center gap-1.5">
           <button
+            type="button"
             onClick={onConnectBridge}
-            className="flex items-center gap-1 px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white text-[10.5px] transition"
+            className="flex items-center gap-1 px-2.5 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-sans font-medium transition"
             title="Send H2_CONNECT_REQ (Protocol v1.3)"
           >
             <Plug className="w-3 h-3" />
@@ -273,8 +253,9 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
           </button>
 
           <button
+            type="button"
             onClick={handleCopyAllLogs}
-            className="flex items-center gap-1 px-2 py-0.5 rounded bg-white dark:bg-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 border border-slate-300 dark:border-zinc-700 text-[10.5px] transition"
+            className="flex items-center gap-1 px-2.5 py-1 rounded bg-white dark:bg-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 border border-slate-300 dark:border-zinc-700 text-[11px] font-sans transition"
             title="Copy full JSON debug log"
           >
             {isLogCopied ? (
@@ -291,26 +272,32 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
           </button>
 
           <button
+            type="button"
             onClick={onClearLogs}
-            className="p-1 hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-500 dark:text-zinc-400 hover:text-red-600 dark:hover:text-red-400 rounded transition"
+            className="p-1.5 hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-500 dark:text-zinc-400 hover:text-red-600 dark:hover:text-red-400 rounded transition"
             title="Clear debug stream"
           >
             <Trash2 className="w-3.5 h-3.5" />
           </button>
 
           <button
+            type="button"
             onClick={onClose}
-            className="p-1 hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white rounded transition"
-            title="Close debug panel"
+            className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-200 text-[11px] font-sans font-medium transition ml-1"
+            title="Close Extension Bridge Debugger tab (Esc)"
           >
             <X className="w-3.5 h-3.5" />
+            <span>Close</span>
+            <kbd className="text-[10px] font-mono text-slate-500 dark:text-zinc-400 bg-slate-100 dark:bg-zinc-900 px-1 rounded">
+              Esc
+            </kbd>
           </button>
         </div>
       </div>
 
       {/* Target Destination & H2 Session Bar */}
       {showTargetDetails && (
-        <div className="bg-slate-100/80 dark:bg-[#161619] border-b border-slate-200 dark:border-zinc-800 p-2.5 px-3 text-[11px] space-y-1.5 shrink-0">
+        <div className="bg-slate-100/80 dark:bg-[#161619] border-b border-slate-200 dark:border-zinc-800 p-3 px-4 text-[11px] space-y-2 shrink-0">
           {connectionError && (
             <div className="p-2 rounded bg-red-50 dark:bg-red-950/50 border border-red-300 dark:border-red-500/40 text-red-700 dark:text-red-200 text-[10.5px]">
               {connectionReasonCode ? `[${connectionReasonCode}] ` : ''}
@@ -319,30 +306,33 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
           )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 font-mono text-[10.5px]">
-            <div className="p-1.5 rounded bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800">
+            <div className="p-2 rounded bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800">
               <div className="text-slate-500 dark:text-zinc-500 text-[9.5px]">Protocol & Mode:</div>
               <div className="text-emerald-700 dark:text-emerald-300 font-semibold">
                 H2_CLOUD_BRIDGE v1.3 ({handshakeInfo?.sessionMode || 'unconnected'})
               </div>
             </div>
 
-            <div className="p-1.5 rounded bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800">
+            <div className="p-2 rounded bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800">
               <div className="text-slate-500 dark:text-zinc-500 text-[9.5px]">
                 sessionStorage ({H2_SESSION_STORAGE_KEY}):
               </div>
-              <div className="text-slate-900 dark:text-white truncate font-semibold" title={sessionId || 'None active'}>
+              <div
+                className="text-slate-900 dark:text-white truncate font-semibold"
+                title={sessionId || 'None active'}
+              >
                 {sessionId || 'No active session'}
               </div>
             </div>
 
-            <div className="p-1.5 rounded bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800">
+            <div className="p-2 rounded bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800">
               <div className="text-slate-500 dark:text-zinc-500 text-[9.5px]">Origin & Access Mode:</div>
               <div className="text-blue-700 dark:text-blue-300 truncate font-semibold">
                 {currentOrigin} ({handshakeInfo?.accessMode || 'readwrite'})
               </div>
             </div>
 
-            <div className="p-1.5 rounded bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800">
+            <div className="p-2 rounded bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800">
               <div className="text-slate-500 dark:text-zinc-500 text-[9.5px]">Scope & Drive Root:</div>
               <div className="text-emerald-700 dark:text-emerald-300 truncate font-semibold">
                 {handshakeInfo?.launchedScope
@@ -353,12 +343,12 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
           </div>
 
           {handshakeInfo?.drives && (
-            <div className="flex flex-wrap items-center gap-2 text-[10px] text-slate-600 dark:text-zinc-400 pt-1">
+            <div className="flex flex-wrap items-center gap-2 text-[10px] text-slate-600 dark:text-zinc-400 pt-0.5">
               <span>Drives:</span>
               {Object.entries(handshakeInfo.drives).map(([drive, st]) => (
                 <span
                   key={drive}
-                  className={`px-1.5 py-0.2 rounded border ${
+                  className={`px-1.5 py-0.5 rounded border ${
                     st.connected
                       ? st.visible
                         ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-500/30'
@@ -378,7 +368,7 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
               {Object.entries(handshakeInfo.capabilities).map(([cap, enabled]) => (
                 <span
                   key={cap}
-                  className={`px-1.5 py-0.2 rounded border ${
+                  className={`px-1.5 py-0.5 rounded border ${
                     enabled
                       ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-500/30'
                       : 'bg-white dark:bg-zinc-900 text-slate-500 dark:text-zinc-500 border-slate-200 dark:border-zinc-800'
@@ -393,9 +383,9 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
       )}
 
       {/* Main Debug Stream List */}
-      <div className="flex-1 overflow-y-auto p-2 space-y-1 bg-white dark:bg-[#0b0b0d]">
+      <div className="flex-1 overflow-y-auto p-3 space-y-1.5 bg-white dark:bg-[#0b0b0d]">
         {filteredMessages.length === 0 ? (
-          <div className="p-8 text-center text-slate-500 dark:text-zinc-500 text-xs italic space-y-2">
+          <div className="p-12 text-center text-slate-500 dark:text-zinc-500 text-xs italic space-y-2">
             <div>No H2_CLOUD_BRIDGE communication logged yet.</div>
             <div className="text-[11px] text-slate-400 dark:text-zinc-600 font-mono">
               Click Connect (H2_CONNECT_REQ) to start a v1.3 session over window.postMessage.
@@ -432,12 +422,12 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
                     : 'bg-slate-50 dark:bg-zinc-900/50 border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700'
                 }`}
               >
-                <div className="flex items-center justify-between px-2.5 py-1.5 select-auto">
+                <div className="flex items-center justify-between px-3 py-2 select-auto">
                   <div className="flex items-center gap-2 truncate">
                     {isExpanded ? (
-                      <ChevronDown className="w-3 h-3 text-slate-500 dark:text-zinc-400 shrink-0" />
+                      <ChevronDown className="w-3.5 h-3.5 text-slate-500 dark:text-zinc-400 shrink-0" />
                     ) : (
-                      <ChevronRight className="w-3 h-3 text-slate-500 dark:text-zinc-400 shrink-0" />
+                      <ChevronRight className="w-3.5 h-3.5 text-slate-500 dark:text-zinc-400 shrink-0" />
                     )}
 
                     <span className="text-slate-500 dark:text-zinc-400 font-mono text-[10px] shrink-0">
@@ -445,7 +435,7 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
                     </span>
 
                     <span
-                      className={`px-1.5 py-0.2 rounded font-bold text-[9px] flex items-center gap-1 shrink-0 ${
+                      className={`px-1.5 py-0.5 rounded font-bold text-[9px] flex items-center gap-1 shrink-0 ${
                         isOutgoing
                           ? 'bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-500/30'
                           : msg.direction === 'incoming'
@@ -492,7 +482,7 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
                     )}
 
                     <span
-                      className={`px-1.5 py-0.2 rounded text-[9.5px] font-bold ${
+                      className={`px-1.5 py-0.5 rounded text-[9.5px] font-bold ${
                         msg.status === 'received'
                           ? 'bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/30'
                           : msg.status === 'error' || msg.status === 'timeout'
@@ -504,6 +494,7 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
                     </span>
 
                     <button
+                      type="button"
                       onClick={e => handleCopyMessage(msg, e)}
                       className="p-1 hover:bg-slate-200 dark:hover:bg-zinc-800 rounded text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white transition"
                       title="Copy message JSON"
@@ -563,10 +554,12 @@ export const ExtensionDebugger: React.FC<ExtensionDebuggerProps> = ({
       </div>
 
       {/* Footer */}
-      <div className="px-3 py-1 bg-slate-100 dark:bg-[#18181c] border-t border-slate-200 dark:border-zinc-800/80 flex items-center justify-between text-[10.5px] text-slate-600 dark:text-zinc-400 shrink-0">
+      <div className="px-4 py-1.5 bg-slate-100 dark:bg-[#18181c] border-t border-slate-200 dark:border-zinc-800/80 flex items-center justify-between text-[10.5px] text-slate-600 dark:text-zinc-400 shrink-0">
         <div className="flex items-center gap-2">
           <span>Transport:</span>
-          <span className="text-emerald-700 dark:text-emerald-400">window.postMessage(envelope, window.location.origin)</span>
+          <span className="text-emerald-700 dark:text-emerald-400">
+            window.postMessage(envelope, window.location.origin)
+          </span>
         </div>
         <div className="flex items-center gap-2">
           <span>

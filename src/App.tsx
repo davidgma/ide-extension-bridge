@@ -14,22 +14,27 @@
  */
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { CloudFile, CloudProvider, EditorTheme, OpenTab } from './types/ide';
+import {
+  CloudFile,
+  CloudProvider,
+  OpenTab,
+  OpenTabKind,
+  BRIDGE_STATUS_TAB_ID,
+  BRIDGE_DEBUGGER_TAB_ID,
+} from './types/ide';
 import { INITIAL_CLOUD_FILES, inferMimeType } from './utils/fileSystem';
 import { H2SaveFileRes, H2DeleteFileRes } from './utils/h2BridgeClient';
 import { useExtensionBridge } from './hooks/useExtensionBridge';
 import { useDynamicFavicon } from './hooks/useDynamicFavicon';
 import { useIdeSettings } from './hooks/useIdeSettings';
-import { executeCode, RunResult } from './utils/codeRunner';
 import { MenuBar } from './components/MenuBar';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { TabsBar } from './components/TabsBar';
 import { EditorArea } from './components/EditorArea';
-import { OutputConsole } from './components/OutputConsole';
-import { ExtensionDebugger } from './components/ExtensionDebugger';
+import { ExtensionBridgeStatusPage } from './components/ExtensionBridgeStatusPage';
+import { ExtensionDebuggerPage } from './components/ExtensionDebuggerPage';
 import { StatusBar } from './components/StatusBar';
-import { ExtensionBridgeModal } from './components/ExtensionBridgeModal';
 import { QuickOpenModal } from './components/QuickOpenModal';
 import { SearchWorkspaceModal } from './components/SearchWorkspaceModal';
 import { ShortcutsModal } from './components/ShortcutsModal';
@@ -70,14 +75,7 @@ export default function App() {
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
   const [selectionLength, setSelectionLength] = useState(0);
 
-  // State: Code execution
-  const [consoleResult, setConsoleResult] = useState<RunResult | null>(null);
-  const [isConsoleOpen, setIsConsoleOpen] = useState(false);
-  const [isRunningCode, setIsRunningCode] = useState(false);
-
-  // State: Extension Debugger drawer & modals
-  const [isDebuggerOpen, setIsDebuggerOpen] = useState(false);
-  const [isBridgeModalOpen, setIsBridgeModalOpen] = useState(false);
+  // State: Modals
   const [isQuickOpenOpen, setIsQuickOpenOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
@@ -357,6 +355,35 @@ export default function App() {
     setSelectionLength(prev => (prev === selLen ? prev : selLen));
   }, []);
 
+  // Open or focus a singleton virtual editor tab (Extension Bridge Status / Debugger)
+  const openVirtualTab = useCallback(
+    (tabId: string, title: string, kind: OpenTabKind) => {
+      setOpenTabs(prev => {
+        if (prev.some(t => t.fileId === tabId)) return prev;
+        return [
+          ...prev,
+          {
+            fileId: tabId,
+            path: title,
+            title,
+            previewMode: 'code',
+            kind,
+          },
+        ];
+      });
+      setActiveTabId(tabId);
+    },
+    []
+  );
+
+  const handleOpenBridgeStatus = useCallback(() => {
+    openVirtualTab(BRIDGE_STATUS_TAB_ID, 'Extension Bridge Status', 'bridge-status');
+  }, [openVirtualTab]);
+
+  const handleOpenBridgeDebugger = useCallback(() => {
+    openVirtualTab(BRIDGE_DEBUGGER_TAB_ID, 'Extension Bridge Debugger', 'bridge-debugger');
+  }, [openVirtualTab]);
+
   // File selection & lazy H2_READ_FILE_REQ hydration
   const handleSelectFile = useCallback(
     (fileId: string) => {
@@ -378,6 +405,18 @@ export default function App() {
       }
     },
     [files, readCloudFile]
+  );
+
+  // Select any tab (virtual Bridge tabs or workspace file tabs)
+  const handleSelectTab = useCallback(
+    (tabId: string) => {
+      if (tabId === BRIDGE_STATUS_TAB_ID || tabId === BRIDGE_DEBUGGER_TAB_ID) {
+        setActiveTabId(tabId);
+        return;
+      }
+      handleSelectFile(tabId);
+    },
+    [handleSelectFile]
   );
 
   // Lazy folder expansion via H2_LIST_FOLDER_REQ
@@ -506,29 +545,6 @@ export default function App() {
       notify('All files are up-to-date');
     }
   }, [isReadOnly, canSave, files, saveAllCloudFiles, cloudProvider, notify]);
-
-  // Run Code
-  const handleRunCode = useCallback(() => {
-    if (!activeFile) return;
-    if (activeFile.contentLoaded === false) {
-      notify('Fetching file content before executing...');
-      handleRetryLoadFile(activeFile);
-      return;
-    }
-
-    setIsRunningCode(true);
-    setIsConsoleOpen(true);
-    setTimeout(() => {
-      const res = executeCode(activeFile.name, activeFile.content);
-      setConsoleResult(res);
-      setIsRunningCode(false);
-      if (res.success) {
-        notify(`Executed ${activeFile.name}`);
-      } else {
-        notify(`Execution error in ${activeFile.name}`);
-      }
-    }, 120);
-  }, [activeFile, handleRetryLoadFile, notify]);
 
   // Create new file
   const handleCreateFile = useCallback(
@@ -867,15 +883,44 @@ export default function App() {
         e.preventDefault();
         updateSettings({ sidebarOpen: !isSidebarOpen });
       }
+
+      if (isCmdOrCtrl && !e.shiftKey && e.key.toLowerCase() === 'w' && activeTabId) {
+        e.preventDefault();
+        handleCloseTab(activeTabId);
+      }
+
+      if (
+        e.key === 'Escape' &&
+        !isQuickOpenOpen &&
+        !isSearchOpen &&
+        !isShortcutsOpen &&
+        !isExportPrefsOpen &&
+        !isImportPrefsOpen &&
+        (activeTabId === BRIDGE_STATUS_TAB_ID || activeTabId === BRIDGE_DEBUGGER_TAB_ID)
+      ) {
+        e.preventDefault();
+        handleCloseTab(activeTabId);
+      }
     };
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [handleSaveCurrent, updateSettings, isSidebarOpen]);
+  }, [
+    handleSaveCurrent,
+    updateSettings,
+    isSidebarOpen,
+    activeTabId,
+    handleCloseTab,
+    isQuickOpenOpen,
+    isSearchOpen,
+    isShortcutsOpen,
+    isExportPrefsOpen,
+    isImportPrefsOpen,
+  ]);
 
   return (
     <div className="h-screen w-screen flex flex-col bg-slate-50 dark:bg-[#18181b] text-slate-900 dark:text-zinc-200 select-auto overflow-hidden">
-      {/* Minimal Always-Visible Main Menu Bar (expanded in Step 4) */}
+      {/* Always-Visible Main Menu Bar */}
       <MenuBar
         colorMode={settings.colorMode}
         onSetColorMode={mode => {
@@ -893,15 +938,14 @@ export default function App() {
           resetSettings();
           notify('Preferences reset to defaults');
         }}
+        onOpenBridgeStatus={handleOpenBridgeStatus}
+        onOpenBridgeDebugger={handleOpenBridgeDebugger}
       />
 
       {/* Top Header */}
       <Header
         activeFile={activeFile}
         files={files}
-        sessionId={sessionId}
-        extensionStatus={extensionStatus}
-        handshakeInfo={handshakeInfo}
         isSaving={isSaving}
         isReadOnly={isReadOnly}
         canSave={canSave}
@@ -910,18 +954,13 @@ export default function App() {
         minimap={minimap}
         lineCount={lineCount}
         charCount={charCount}
-        isRunningCode={isRunningCode}
         onThemeChange={setEditorTheme}
         onToggleWordWrap={() => updateSettings({ wordWrap: !wordWrap })}
         onToggleMinimap={() => updateSettings({ minimap: !minimap })}
         onSaveCurrent={handleSaveCurrent}
         onSaveAll={handleSaveAll}
-        onStartBridge={() => startBridge()}
-        onStopBridge={stopBridge}
-        onRunCode={handleRunCode}
         onOpenQuickOpen={() => setIsQuickOpenOpen(true)}
         onOpenSearch={() => setIsSearchOpen(true)}
-        onOpenBridgeModal={() => setIsBridgeModalOpen(true)}
         onOpenShortcutsModal={() => setIsShortcutsOpen(true)}
       />
 
@@ -992,7 +1031,7 @@ export default function App() {
             openTabs={openTabs}
             activeTabId={activeTabId}
             files={files}
-            onSelectTab={handleSelectFile}
+            onSelectTab={handleSelectTab}
             onCloseTab={handleCloseTab}
             onCloseAllTabs={handleCloseAllTabs}
             onCloseOtherTabs={handleCloseOtherTabs}
@@ -1010,41 +1049,43 @@ export default function App() {
                 fontSize={settings.fontSize}
                 tabSize={settings.tabSize}
                 isReadOnly={isReadOnly}
+                bridgeStatusView={
+                  <ExtensionBridgeStatusPage
+                    sessionId={sessionId}
+                    extensionStatus={extensionStatus}
+                    handshakeInfo={handshakeInfo}
+                    connectionError={connectionError}
+                    connectionReasonCode={connectionReasonCode}
+                    messagesLog={messagesLog}
+                    onConnectBridge={() => startBridge()}
+                    onStopBridge={stopBridge}
+                    onClearLogs={clearLogs}
+                    onClose={() => handleCloseTab(BRIDGE_STATUS_TAB_ID)}
+                  />
+                }
+                bridgeDebuggerView={
+                  <ExtensionDebuggerPage
+                    sessionId={sessionId}
+                    messagesLog={messagesLog}
+                    extensionStatus={extensionStatus}
+                    handshakeInfo={handshakeInfo}
+                    connectionError={connectionError}
+                    connectionReasonCode={connectionReasonCode}
+                    onClose={() => handleCloseTab(BRIDGE_DEBUGGER_TAB_ID)}
+                    onClearLogs={clearLogs}
+                    onConnectBridge={() => startBridge()}
+                  />
+                }
                 onContentChange={handleContentChange}
                 onSaveFile={saveCloudFile}
                 onRetryLoadFile={handleRetryLoadFile}
                 onCursorChange={handleCursorChange}
                 onOpenQuickOpen={() => setIsQuickOpenOpen(true)}
-                onOpenBridgeModal={() => setIsBridgeModalOpen(true)}
+                onOpenSearch={() => setIsSearchOpen(true)}
                 onOpenFile={handleSelectFile}
                 files={files}
               />
             </div>
-
-            {/* Extension Debugger Drawer */}
-            <ExtensionDebugger
-              isOpen={isDebuggerOpen}
-              sessionId={sessionId}
-              messagesLog={messagesLog}
-              extensionStatus={extensionStatus}
-              handshakeInfo={handshakeInfo}
-              connectionError={connectionError}
-              connectionReasonCode={connectionReasonCode}
-              onClose={() => setIsDebuggerOpen(false)}
-              onClearLogs={clearLogs}
-              onConnectBridge={() => startBridge()}
-            />
-
-            {/* Output / Terminal Drawer */}
-            <OutputConsole
-              isOpen={isConsoleOpen}
-              activeFile={activeFile?.name || 'Untitled'}
-              result={consoleResult}
-              isRunning={isRunningCode}
-              onClose={() => setIsConsoleOpen(false)}
-              onClear={() => setConsoleResult(null)}
-              onRunAgain={handleRunCode}
-            />
           </div>
         </div>
       </div>
@@ -1056,32 +1097,9 @@ export default function App() {
         selectionLength={selectionLength}
         tabSize={settings.tabSize}
         extensionStatus={extensionStatus}
-        handshakeInfo={handshakeInfo}
-        isSaving={isSaving}
         isReadOnly={isReadOnly}
         statusNotification={statusNotification}
-        onStartBridge={() => startBridge()}
-        onStopBridge={stopBridge}
-        onOpenBridgeModal={() => setIsBridgeModalOpen(true)}
-        onToggleConsole={() => setIsConsoleOpen(prev => !prev)}
-        isConsoleOpen={isConsoleOpen}
-        onToggleDebugger={() => setIsDebuggerOpen(prev => !prev)}
-        isDebuggerOpen={isDebuggerOpen}
-      />
-
-      {/* Extension Bridge Inspector Modal */}
-      <ExtensionBridgeModal
-        isOpen={isBridgeModalOpen}
-        onClose={() => setIsBridgeModalOpen(false)}
-        sessionId={sessionId}
-        extensionStatus={extensionStatus}
-        handshakeInfo={handshakeInfo}
-        connectionError={connectionError}
-        connectionReasonCode={connectionReasonCode}
-        messagesLog={messagesLog}
-        onConnectBridge={() => startBridge()}
-        onStopBridge={stopBridge}
-        onClearLogs={clearLogs}
+        onOpenBridgeStatus={handleOpenBridgeStatus}
       />
 
       {/* Quick Open (Cmd+P) Modal */}

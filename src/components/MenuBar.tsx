@@ -18,6 +18,8 @@ import {
   RotateCcw,
   Check,
   SlidersHorizontal,
+  Radio,
+  Bug,
 } from 'lucide-react';
 import { UiColorMode } from '../types/ide';
 
@@ -28,6 +30,8 @@ interface MenuBarProps {
   onOpenExportPreferences: () => void;
   onOpenImportPreferences: () => void;
   onResetPreferences: () => void;
+  onOpenBridgeStatus: () => void;
+  onOpenBridgeDebugger: () => void;
 }
 
 export const MenuBar: React.FC<MenuBarProps> = ({
@@ -37,12 +41,14 @@ export const MenuBar: React.FC<MenuBarProps> = ({
   onOpenExportPreferences,
   onOpenImportPreferences,
   onResetPreferences,
+  onOpenBridgeStatus,
+  onOpenBridgeDebugger,
 }) => {
-  const [openMenu, setOpenMenu] = useState<'file' | null>(null);
+  const [openMenu, setOpenMenu] = useState<'file' | 'bridge' | null>(null);
   const [preferencesSubmenuOpen, setPreferencesSubmenuOpen] = useState(false);
   const menuContainerRef = useRef<HTMLDivElement>(null);
 
-  // Close menus when clicking outside or pressing Escape
+  // Close menus when clicking outside or pressing Escape (capture phase prevents also closing an active Bridge tab)
   useEffect(() => {
     const handleOutsideClick = (e: MouseEvent) => {
       if (menuContainerRef.current && !menuContainerRef.current.contains(e.target as Node)) {
@@ -51,19 +57,20 @@ export const MenuBar: React.FC<MenuBarProps> = ({
       }
     };
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && openMenu !== null) {
+        e.stopPropagation();
         setOpenMenu(null);
         setPreferencesSubmenuOpen(false);
       }
     };
 
     window.addEventListener('mousedown', handleOutsideClick);
-    window.addEventListener('keydown', handleEscape);
+    window.addEventListener('keydown', handleEscape, true);
     return () => {
       window.removeEventListener('mousedown', handleOutsideClick);
-      window.removeEventListener('keydown', handleEscape);
+      window.removeEventListener('keydown', handleEscape, true);
     };
-  }, []);
+  }, [openMenu]);
 
   const closeAllMenus = () => {
     setOpenMenu(null);
@@ -78,6 +85,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
     >
       {/* Left: Top-level always-visible menu items (expanded in Step 4) */}
       <div className="flex items-center gap-0.5">
+        {/* File Menu */}
         <div className="relative">
           <button
             type="button"
@@ -85,6 +93,12 @@ export const MenuBar: React.FC<MenuBarProps> = ({
               const next = openMenu === 'file' ? null : 'file';
               setOpenMenu(next);
               setPreferencesSubmenuOpen(false);
+            }}
+            onMouseEnter={() => {
+              if (openMenu && openMenu !== 'file') {
+                setOpenMenu('file');
+                setPreferencesSubmenuOpen(false);
+              }
             }}
             className={`px-2.5 py-0.5 rounded text-xs font-medium transition ${
               openMenu === 'file'
@@ -195,6 +209,58 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                   </div>
                 )}
               </div>
+            </div>
+          )}
+        </div>
+
+        {/* Bridge Menu */}
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => {
+              const next = openMenu === 'bridge' ? null : 'bridge';
+              setOpenMenu(next);
+              setPreferencesSubmenuOpen(false);
+            }}
+            onMouseEnter={() => {
+              if (openMenu && openMenu !== 'bridge') {
+                setOpenMenu('bridge');
+                setPreferencesSubmenuOpen(false);
+              }
+            }}
+            className={`px-2.5 py-0.5 rounded text-xs font-medium transition ${
+              openMenu === 'bridge'
+                ? 'bg-blue-600 text-white'
+                : 'hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-800 dark:text-zinc-200'
+            }`}
+          >
+            Bridge
+          </button>
+
+          {openMenu === 'bridge' && (
+            <div className="absolute left-0 top-full mt-0.5 w-52 rounded-md border border-slate-200 dark:border-zinc-700 bg-white dark:bg-[#1f1f23] shadow-xl py-1 z-50">
+              <button
+                type="button"
+                onClick={() => {
+                  closeAllMenus();
+                  onOpenBridgeStatus();
+                }}
+                className="w-full px-3 py-1.5 text-left flex items-center gap-2 hover:bg-blue-50 dark:hover:bg-blue-950/60 hover:text-blue-700 dark:hover:text-blue-300 text-xs transition"
+              >
+                <Radio className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                <span>Status</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  closeAllMenus();
+                  onOpenBridgeDebugger();
+                }}
+                className="w-full px-3 py-1.5 text-left flex items-center gap-2 hover:bg-blue-50 dark:hover:bg-blue-950/60 hover:text-blue-700 dark:hover:text-blue-300 text-xs transition"
+              >
+                <Bug className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                <span>Show Debugger</span>
+              </button>
             </div>
           )}
         </div>

@@ -18,6 +18,7 @@ import {
   Search,
   Radio,
   FileCode,
+  FileSearch,
   RotateCw,
   AlertTriangle,
   DownloadCloud,
@@ -33,12 +34,14 @@ interface EditorAreaProps {
   fontSize?: number;
   tabSize?: number;
   isReadOnly?: boolean;
+  bridgeStatusView?: React.ReactNode;
+  bridgeDebuggerView?: React.ReactNode;
   onContentChange: (fileId: string, newContent: string) => void;
   onSaveFile: (file: CloudFile) => void;
   onRetryLoadFile: (file: CloudFile) => void;
   onCursorChange: (pos: { line: number; col: number }, selectionLength: number) => void;
   onOpenQuickOpen: () => void;
-  onOpenBridgeModal: () => void;
+  onOpenSearch: () => void;
   onOpenFile: (fileId: string) => void;
   files: CloudFile[];
 }
@@ -52,12 +55,14 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
   fontSize = 13.5,
   tabSize = 2,
   isReadOnly = false,
+  bridgeStatusView,
+  bridgeDebuggerView,
   onContentChange,
   onSaveFile,
   onRetryLoadFile,
   onCursorChange,
   onOpenQuickOpen,
-  onOpenBridgeModal,
+  onOpenSearch,
   onOpenFile,
   files,
 }) => {
@@ -115,7 +120,16 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
     }
   }, [activeTheme]);
 
-  // Welcome Hero when no file tab is open
+  // Render full-page Extension Bridge views when selected as tabs
+  if (activeTab?.kind === 'bridge-status' && bridgeStatusView) {
+    return <>{bridgeStatusView}</>;
+  }
+
+  if (activeTab?.kind === 'bridge-debugger' && bridgeDebuggerView) {
+    return <>{bridgeDebuggerView}</>;
+  }
+
+  // Welcome Hero when no file or bridge tab is open
   if (!activeFile) {
     const recentFiles = files.filter(f => !f.isDirectory).slice(0, 6);
     return (
@@ -132,9 +146,6 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
             <p className="text-xs text-slate-500 dark:text-zinc-400 mt-2 font-mono">
               Target Host: <span className="text-emerald-700 dark:text-emerald-300">https://ide.freshfood.rocks</span>
             </p>
-            <p className="text-xs text-slate-500 dark:text-zinc-400 mt-1">
-              H2 Cloud Bridge Protocol v1.3 (H2_CLOUD_BRIDGE)
-            </p>
           </div>
 
           <div className="grid grid-cols-2 gap-3 text-left">
@@ -150,14 +161,16 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
             </button>
 
             <button
-              onClick={onOpenBridgeModal}
+              onClick={onOpenSearch}
               className="p-3 rounded-xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 hover:border-blue-500/60 hover:bg-slate-100/70 dark:hover:bg-zinc-800/70 transition group shadow-2xs"
             >
               <div className="flex items-center gap-2 text-slate-800 dark:text-zinc-200 group-hover:text-blue-600 dark:group-hover:text-blue-400 font-semibold text-xs">
-                <Radio className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                <span>Bridge Protocol</span>
+                <FileSearch className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                <span>Search Workspace</span>
               </div>
-              <div className="text-[11px] text-slate-500 dark:text-zinc-500 mt-1 font-mono font-normal">Inspect v1.3</div>
+              <div className="text-[11px] text-slate-500 dark:text-zinc-500 mt-1 font-mono font-normal">
+                ⌘⇧F / Ctrl+Shift+F
+              </div>
             </button>
           </div>
 

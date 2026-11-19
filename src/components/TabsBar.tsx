@@ -12,7 +12,9 @@ import {
   Film,
   Columns,
   Eye,
-  Code
+  Code,
+  Radio,
+  Bug,
 } from 'lucide-react';
 import { getFileExtension, isMarkdownFile, isImageFile, isVideoFile } from '../utils/fileSystem';
 
@@ -38,13 +40,23 @@ export const TabsBar: React.FC<TabsBarProps> = ({
   onSetPreviewMode,
 }) => {
   const activeTab = openTabs.find(t => t.fileId === activeTabId);
-  const activeFile = files.find(f => f.id === activeTabId);
+  const activeFile =
+    activeTab?.kind && activeTab.kind !== 'file'
+      ? undefined
+      : files.find(f => f.id === activeTabId);
   const isMd = activeFile && isMarkdownFile(activeFile.name);
 
-  const getTabIcon = (filename: string) => {
-    const ext = getFileExtension(filename);
-    if (isImageFile(filename)) return <ImageIcon className="w-3.5 h-3.5 text-red-500 dark:text-red-400" />;
-    if (isVideoFile(filename)) return <Film className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />;
+  const getTabIcon = (tab: OpenTab) => {
+    if (tab.kind === 'bridge-status') {
+      return <Radio className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />;
+    }
+    if (tab.kind === 'bridge-debugger') {
+      return <Bug className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />;
+    }
+
+    const ext = getFileExtension(tab.title);
+    if (isImageFile(tab.title)) return <ImageIcon className="w-3.5 h-3.5 text-red-500 dark:text-red-400" />;
+    if (isVideoFile(tab.title)) return <Film className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />;
     if (['ts', 'tsx'].includes(ext)) return <Code2 className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />;
     if (['js', 'jsx'].includes(ext)) return <FileCode className="w-3.5 h-3.5 text-red-600 dark:text-red-400" />;
     if (['json'].includes(ext)) return <FileJson className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />;
@@ -58,18 +70,19 @@ export const TabsBar: React.FC<TabsBarProps> = ({
 
   if (openTabs.length === 0) {
     return (
-      <div className="h-9 bg-slate-100 dark:bg-[#1e1e20] border-b border-slate-200 dark:border-zinc-800 flex items-center px-4 text-xs text-slate-500 dark:text-zinc-500 italic">
-        No files open. Click a file in the sidebar or press Cmd+P to open.
+      <div className="h-9 bg-slate-100 dark:bg-[#1e1e20] border-b border-slate-200 dark:border-zinc-800 flex items-center px-4 text-xs text-slate-500 dark:text-zinc-500 italic shrink-0">
+        No tabs open. Click a file in the sidebar or press Ctrl+P to open.
       </div>
     );
   }
 
   return (
-    <div className="h-9 bg-slate-100 dark:bg-[#1b1b1e] border-b border-slate-200 dark:border-zinc-800/90 flex items-center justify-between select-auto overflow-hidden">
+    <div className="h-9 bg-slate-100 dark:bg-[#1b1b1e] border-b border-slate-200 dark:border-zinc-800/90 flex items-center justify-between select-auto overflow-hidden shrink-0">
       {/* Scrollable Tabs */}
       <div className="flex items-center h-full overflow-x-auto no-scrollbar flex-1">
         {openTabs.map(tab => {
-          const file = files.find(f => f.id === tab.fileId);
+          const isVirtual = tab.kind === 'bridge-status' || tab.kind === 'bridge-debugger';
+          const file = isVirtual ? undefined : files.find(f => f.id === tab.fileId);
           const isActive = tab.fileId === activeTabId;
           const isDirty = file?.isDirty;
 
@@ -81,7 +94,11 @@ export const TabsBar: React.FC<TabsBarProps> = ({
                 e.preventDefault();
                 onCloseOtherTabs(tab.fileId);
               }}
-              title={`${tab.path} ${isDirty ? '(Unsaved Changes)' : ''}`}
+              title={
+                isVirtual
+                  ? tab.title
+                  : `${tab.path} ${isDirty ? '(Unsaved Changes)' : ''}`
+              }
               className={`group relative h-full flex items-center gap-2 px-3 border-r border-slate-200 dark:border-zinc-800/80 cursor-pointer text-xs transition-colors shrink-0 ${
                 isActive
                   ? 'bg-white dark:bg-[#18181b] text-slate-900 dark:text-white font-medium shadow-inner'
@@ -94,10 +111,14 @@ export const TabsBar: React.FC<TabsBarProps> = ({
               )}
 
               {/* Icon */}
-              {getTabIcon(tab.title)}
+              {getTabIcon(tab)}
 
-              {/* Filename */}
-              <span className="truncate max-w-[150px] font-mono text-[11.5px]">
+              {/* Title */}
+              <span
+                className={`truncate max-w-[190px] text-[11.5px] ${
+                  isVirtual ? 'font-sans' : 'font-mono'
+                }`}
+              >
                 {tab.title}
               </span>
 
