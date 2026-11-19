@@ -30,7 +30,7 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
   if (!isOpen) return null;
 
   const shortcuts = [
-    { key: 'Ctrl + N / Alt + N', desc: 'Create new untitled scratchpad file (use Alt+N in normal browser tabs)' },
+    { key: 'Alt + N', desc: 'Create new untitled scratchpad file' },
     { key: 'Ctrl + S', desc: 'Save active file (opens Save As... for untitled files)' },
     { key: 'Ctrl + Shift + S / Ctrl + Alt + N', desc: 'Save As... to choose drive, folder, and filename' },
     { key: 'Ctrl + Shift + P / F1', desc: 'Open Command Palette (IDE commands, type/clear > to toggle)' },

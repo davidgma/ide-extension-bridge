@@ -169,7 +169,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                   <span>New File</span>
                 </span>
                 <kbd className="text-[10px] font-mono text-slate-400 dark:text-zinc-500">
-                  Ctrl+N / Alt+N
+                  Alt+N
                 </kbd>
               </button>
 

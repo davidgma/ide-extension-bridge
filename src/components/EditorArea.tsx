@@ -52,6 +52,7 @@ interface EditorAreaProps {
   onOpenSearch: () => void;
   onOpenFile: (fileId: string) => void;
   files: CloudFile[];
+  focusTrigger?: { fileId: string; nonce: number } | null;
 }
 
 export const EditorArea: React.FC<EditorAreaProps> = ({
@@ -80,6 +81,7 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
   onOpenSearch,
   onOpenFile,
   files,
+  focusTrigger = null,
 }) => {
   const monacoRef = useRef<Monaco | null>(null);
   const editorRef = useRef<any>(null);
@@ -90,8 +92,13 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
   const onOpenQuickOpenRef = useRef(onOpenQuickOpen);
   const onOpenCommandPaletteRef = useRef(onOpenCommandPalette);
   const activeFileRef = useRef(activeFile);
+  const focusTriggerRef = useRef(focusTrigger);
   // Tracks the last externalVersion synced into each Monaco model so rapid local typing is never overwritten
   const syncedExternalVersionRef = useRef<Record<string, number>>({});
+
+  useEffect(() => {
+    focusTriggerRef.current = focusTrigger;
+  }, [focusTrigger]);
 
   useEffect(() => {
     onCursorChangeRef.current = onCursorChange;
@@ -145,10 +152,6 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
       }
     );
 
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyN, () => {
-      onNewFileRef.current?.();
-    });
-
     editor.addCommand(monaco.KeyMod.Alt | monaco.KeyCode.KeyN, () => {
       onNewFileRef.current?.();
     });
@@ -182,6 +185,19 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
         );
       }
     });
+
+    // If editor just mounted specifically for a newly created file, jump cursor to start and focus
+    if (
+      activeFileRef.current &&
+      (focusTriggerRef.current?.fileId === activeFileRef.current.id ||
+        activeFileRef.current.isUntitled)
+    ) {
+      requestAnimationFrame(() => {
+        editor.setPosition({ lineNumber: 1, column: 1 });
+        editor.revealPosition({ lineNumber: 1, column: 1 });
+        editor.focus();
+      });
+    }
   };
 
   useEffect(() => {
@@ -219,6 +235,22 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
       monaco.editor.setModelLanguage(model, activeLanguage);
     }
   }, [activeFile?.id, activeLanguage]);
+
+  // Jump cursor to line 1 col 1 and focus Monaco whenever a new file is triggered (File -> New / Alt+N)
+  useEffect(() => {
+    if (!focusTrigger || !activeFile || activeFile.id !== focusTrigger.fileId) return;
+    if (!editorRef.current) return;
+
+    const timer = window.setTimeout(() => {
+      const editor = editorRef.current;
+      if (!editor) return;
+      editor.setPosition({ lineNumber: 1, column: 1 });
+      editor.revealPosition({ lineNumber: 1, column: 1 });
+      editor.focus();
+    }, 20);
+
+    return () => window.clearTimeout(timer);
+  }, [focusTrigger, activeFile?.id]);
 
   // Render full-page Extension Bridge & Preferences views when selected as tabs
   if (activeTab?.kind === 'bridge-status' && bridgeStatusView) {
@@ -264,7 +296,7 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
                 <span>New File</span>
               </div>
               <div className="text-[11px] text-slate-500 dark:text-zinc-500 mt-1 font-mono">
-                Alt+N / Ctrl+N
+                Alt+N
               </div>
             </button>
 

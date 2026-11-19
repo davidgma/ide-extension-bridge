@@ -100,6 +100,7 @@ export default function App() {
   const [isImportPrefsOpen, setIsImportPrefsOpen] = useState(false);
   const [saveAsTargetFileId, setSaveAsTargetFileId] = useState<string | null>(null);
   const [pendingCloseRequest, setPendingCloseRequest] = useState<PendingTabCloseRequest | null>(null);
+  const [editorFocusSignal, setEditorFocusSignal] = useState<{ fileId: string; nonce: number } | null>(null);
   const [statusNotification, setStatusNotification] = useState<string | null>(null);
   const [moveConflict, setMoveConflict] = useState<SidebarMoveConflict | null>(null);
 
@@ -1014,6 +1015,7 @@ export default function App() {
       { fileId: newId, path: title, title, previewMode: 'code' },
     ]);
     setActiveTabId(newId);
+    setEditorFocusSignal({ fileId: newId, nonce: Date.now() + Math.random() });
     notify(`New untitled file: ${title}`);
   }, [notify]);
 
@@ -2055,11 +2057,8 @@ export default function App() {
       const isKeyS = e.code === 'KeyS' || e.key.toLowerCase() === 's';
       const isKeyP = e.code === 'KeyP' || e.key.toLowerCase() === 'p';
 
-      // New File: Alt+N (reliable everywhere) or Ctrl+N (works in installed app windows)
-      if (
-        (e.altKey && !isCmdOrCtrl && !e.shiftKey && isKeyN) ||
-        (isCmdOrCtrl && !e.shiftKey && !e.altKey && isKeyN)
-      ) {
+      // New File: Alt+N
+      if (e.altKey && !isCmdOrCtrl && !e.shiftKey && isKeyN) {
         e.preventDefault();
         e.stopPropagation();
         handleNewFile();
@@ -2173,7 +2172,7 @@ export default function App() {
         id: 'file.new',
         category: 'File',
         label: 'New File',
-        shortcut: 'Ctrl+N / Alt+N',
+        shortcut: 'Alt+N',
         action: handleNewFile,
       },
       {
@@ -2622,6 +2621,7 @@ export default function App() {
                 onOpenSearch={() => setIsSearchOpen(true)}
                 onOpenFile={handleSelectFile}
                 files={files}
+                focusTrigger={editorFocusSignal}
               />
             </div>
           </div>
