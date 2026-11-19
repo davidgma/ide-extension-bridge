@@ -130,7 +130,7 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
             onClick={onClose}
             className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition"
           >
-            Got It
+            Close
           </button>
         </div>
       </div>

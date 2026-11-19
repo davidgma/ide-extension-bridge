@@ -26,10 +26,18 @@ export const SearchWorkspaceModal: React.FC<SearchWorkspaceModalProps> = ({
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (isOpen) {
-      setTimeout(() => inputRef.current?.focus(), 50);
-    }
-  }, [isOpen]);
+    if (!isOpen) return;
+    setTimeout(() => inputRef.current?.focus(), 50);
+
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleEscape, true);
+    return () => window.removeEventListener('keydown', handleEscape, true);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
