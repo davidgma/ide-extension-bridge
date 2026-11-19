@@ -1,0 +1,15 @@
+<!--
+  Default favicon (bridge inactive: black strokes on a transparent background).
+  Uses the Lucide "square-dashed-bottom-code" icon geometry with stroke-width="2.25"
+  for crisp legibility at 16x16 browser tab size.
+  Official Documentation:
+  - SVG on MDN: https://developer.mozilla.org/en-US/docs/Web/SVG
+  - Lucide Icons: https://lucide.dev/icons/square-dashed-bottom-code
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#000000" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M10 9.5 8 12l2 2.5" />
+  <path d="M14 21h1" />
+  <path d="m14 9.5 2 2.5-2 2.5" />
+  <path d="M5 21a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2" />
+  <path d="M9 21h1" />
+</svg>

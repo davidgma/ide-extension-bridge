@@ -18,6 +18,7 @@ import { CloudFile, CloudProvider, EditorTheme, OpenTab } from './types/ide';
 import { INITIAL_CLOUD_FILES, inferMimeType } from './utils/fileSystem';
 import { H2SaveFileRes, H2DeleteFileRes } from './utils/h2BridgeClient';
 import { useExtensionBridge } from './hooks/useExtensionBridge';
+import { useDynamicFavicon } from './hooks/useDynamicFavicon';
 import { executeCode, RunResult } from './utils/codeRunner';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
@@ -288,6 +289,9 @@ export default function App() {
   useEffect(() => {
     readCloudFileRef.current = readCloudFile;
   }, [readCloudFile]);
+
+  // Keep the browser tab favicon black when disconnected/connecting and deep red when connected
+  useDynamicFavicon(extensionStatus === 'connected');
 
   // Derived v1.3 permission / capability flags
   const isReadOnly = extensionStatus === 'connected' && handshakeInfo?.accessMode === 'readonly';
