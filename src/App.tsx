@@ -23,7 +23,14 @@ import {
   BRIDGE_DEBUGGER_TAB_ID,
   PREFERENCES_TAB_ID,
 } from './types/ide';
-import { INITIAL_CLOUD_FILES, inferMimeType } from './utils/fileSystem';
+import {
+  INITIAL_CLOUD_FILES,
+  inferMimeType,
+  isPdfFile,
+  isAudioFile,
+  isKnownBinaryExtension,
+  base64ToBlob,
+} from './utils/fileSystem';
 import {
   H2SaveFileRes,
   H2DeleteFileRes,
@@ -864,13 +871,13 @@ export default function App() {
     });
   }, [selectedDrive, handshakeInfo?.provider, handshakeInfo?.driveRootActive, requestWorkspaceTree]);
 
-  // Retry failed lazy file load
+  // Retry failed lazy file load (or reload explicitly as base64)
   const handleRetryLoadFile = useCallback(
-    (file: CloudFile) => {
+    (file: CloudFile, encodingOverride?: 'utf-8' | 'base64') => {
       setFiles(prev =>
         prev.map(f => (f.id === file.id ? { ...f, isLoadingContent: true, loadError: undefined } : f))
       );
-      readCloudFile(file);
+      readCloudFile(file, encodingOverride);
     },
     [readCloudFile]
   );
@@ -1382,13 +1389,21 @@ export default function App() {
     (sourceFile: CloudFile, downloadFilename: string) => {
       const freshContent = latestContentByIdRef.current[sourceFile.id] ?? sourceFile.content;
       const mime = inferMimeType(downloadFilename);
-      const blob = new Blob([freshContent], { type: mime });
+      const isBinaryPayload =
+        Boolean(sourceFile.isBinary) ||
+        sourceFile.encoding === 'base64' ||
+        isKnownBinaryExtension(downloadFilename);
+
+      const blob = isBinaryPayload
+        ? base64ToBlob(sourceFile.binaryUrl || freshContent, mime) || new Blob([freshContent], { type: mime })
+        : new Blob([freshContent], { type: mime });
+
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
       link.download = downloadFilename;
       link.click();
-      URL.revokeObjectURL(url);
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
       notify(`Downloaded ${downloadFilename} to computer`);
     },
     [notify]
@@ -1944,10 +1959,13 @@ export default function App() {
       Array.from(fileList).forEach(f => {
         const isImg = f.type.startsWith('image/') && !f.type.includes('svg');
         const isVid = f.type.startsWith('video/');
+        const isAud = f.type.startsWith('audio/') || isAudioFile(f.name, f.type);
+        const isPdf = isPdfFile(f.name, f.type);
+        const isBinaryUpload = isImg || isVid || isAud || isPdf || isKnownBinaryExtension(f.name);
         const resolvedMime = f.type || inferMimeType(f.name);
         const targetPath = `uploads/${f.name}`;
 
-        if (isImg || isVid) {
+        if (isBinaryUpload) {
           const reader = new FileReader();
           reader.onload = evt => {
             const dataUrl = (evt.target?.result as string) || '';

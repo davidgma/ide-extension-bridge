@@ -17,12 +17,21 @@ import {
   FileText,
   Image as ImageIcon,
   Film,
+  Music,
+  FileArchive,
   ChevronRight,
   Terminal,
   Check,
 } from 'lucide-react';
 import { CloudFile } from '../types/ide';
-import { isImageFile, isVideoFile, isMarkdownFile } from '../utils/fileSystem';
+import {
+  isImageFile,
+  isVideoFile,
+  isAudioFile,
+  isPdfFile,
+  isMarkdownFile,
+  isKnownBinaryExtension,
+} from '../utils/fileSystem';
 
 export interface IdeCommand {
   id: string;
@@ -275,9 +284,12 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
           ) : (
             filteredFiles.map((file, idx) => {
               const isSelected = idx === selectedIndex;
+              const isPdf = isPdfFile(file.name, file.mimeType);
+              const isAud = isAudioFile(file.name, file.mimeType);
               const isImg = isImageFile(file.name);
               const isVid = isVideoFile(file.name);
               const isMd = isMarkdownFile(file.name);
+              const isBin = isKnownBinaryExtension(file.name) || Boolean(file.isBinary);
 
               return (
                 <div
@@ -294,10 +306,16 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
                   }`}
                 >
                   <div className="flex items-center gap-2 truncate">
-                    {isImg ? (
+                    {isPdf ? (
+                      <FileText className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0" />
+                    ) : isAud ? (
+                      <Music className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+                    ) : isImg ? (
                       <ImageIcon className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
                     ) : isVid ? (
                       <Film className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+                    ) : isBin ? (
+                      <FileArchive className="w-4 h-4 text-slate-600 dark:text-zinc-300 shrink-0" />
                     ) : isMd ? (
                       <FileText className="w-4 h-4 text-teal-600 dark:text-teal-400 shrink-0" />
                     ) : (

@@ -7,10 +7,19 @@
  * - Monaco Editor React: https://github.com/suren-atoyan/monaco-react
  */
 
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import Editor, { Monaco, OnMount } from '@monaco-editor/react';
 import { CloudFile, EditorTheme, OpenTab } from '../types/ide';
-import { getMonacoLanguage, isImageFile, isVideoFile, isMarkdownFile } from '../utils/fileSystem';
+import {
+  getMonacoLanguage,
+  isImageFile,
+  isVideoFile,
+  isAudioFile,
+  isPdfFile,
+  isMarkdownFile,
+  isKnownBinaryExtension,
+  looksLikeBinaryContent,
+} from '../utils/fileSystem';
 import { registerMonarchThemesAndLanguages } from '../utils/monarchThemes';
 import { MarkdownViewer } from './MarkdownViewer';
 import { MediaViewer } from './MediaViewer';
@@ -45,7 +54,7 @@ interface EditorAreaProps {
   onSaveFile: (file: CloudFile) => void;
   onSaveAsFile?: (file: CloudFile) => void;
   onNewFile?: () => void;
-  onRetryLoadFile: (file: CloudFile) => void;
+  onRetryLoadFile: (file: CloudFile, encodingOverride?: 'utf-8' | 'base64') => void;
   onCursorChange: (pos: { line: number; col: number }, selectionLength: number) => void;
   onOpenQuickOpen: () => void;
   onOpenCommandPalette?: () => void;
@@ -95,6 +104,7 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
   const focusTriggerRef = useRef(focusTrigger);
   // Tracks the last externalVersion synced into each Monaco model so rapid local typing is never overwritten
   const syncedExternalVersionRef = useRef<Record<string, number>>({});
+  const [forcedTextFileIds, setForcedTextFileIds] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     focusTriggerRef.current = focusTrigger;
@@ -426,8 +436,31 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
     );
   }
 
-  if (isImageFile(activeFile.name) || isVideoFile(activeFile.name)) {
-    return <MediaViewer file={activeFile} />;
+  const isImg = isImageFile(activeFile.name);
+  const isVid = isVideoFile(activeFile.name);
+  const isAud = isAudioFile(activeFile.name, activeFile.mimeType);
+  const isPdf = isPdfFile(activeFile.name, activeFile.mimeType);
+  const isExplicitBinary =
+    Boolean(activeFile.isBinary) ||
+    activeFile.contentType === 'binary' ||
+    activeFile.encoding === 'base64' ||
+    isKnownBinaryExtension(activeFile.name);
+  const isHeuristicBinary =
+    !isExplicitBinary &&
+    !forcedTextFileIds[activeFile.id] &&
+    looksLikeBinaryContent(activeFile.content);
+
+  if (isImg || isVid || isAud || isPdf || isExplicitBinary || isHeuristicBinary) {
+    return (
+      <MediaViewer
+        file={activeFile}
+        onRetryBase64={() => onRetryLoadFile(activeFile, 'base64')}
+        canForceTextOpen={isHeuristicBinary}
+        onForceTextOpen={() =>
+          setForcedTextFileIds(prev => ({ ...prev, [activeFile.id]: true }))
+        }
+      />
+    );
   }
 
   const isMd = isMarkdownFile(activeFile.name);

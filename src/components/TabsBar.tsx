@@ -8,8 +8,10 @@ import {
   Code2, 
   Terminal, 
   Database, 
-  Image as ImageIcon, 
+  Image as ImageIcon,
   Film,
+  Music,
+  FileArchive,
   Columns,
   Eye,
   Code,
@@ -17,7 +19,15 @@ import {
   Bug,
   SlidersHorizontal,
 } from 'lucide-react';
-import { getFileExtension, isMarkdownFile, isImageFile, isVideoFile } from '../utils/fileSystem';
+import {
+  getFileExtension,
+  isMarkdownFile,
+  isImageFile,
+  isVideoFile,
+  isAudioFile,
+  isPdfFile,
+  isKnownBinaryExtension,
+} from '../utils/fileSystem';
 
 interface TabsBarProps {
   openTabs: OpenTab[];
@@ -59,8 +69,11 @@ export const TabsBar: React.FC<TabsBarProps> = ({
     }
 
     const ext = getFileExtension(tab.title);
-    if (isImageFile(tab.title)) return <ImageIcon className="w-3.5 h-3.5 text-red-500 dark:text-red-400" />;
-    if (isVideoFile(tab.title)) return <Film className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />;
+    if (isPdfFile(tab.title)) return <FileText className="w-3.5 h-3.5 text-red-600 dark:text-red-400 shrink-0" />;
+    if (isAudioFile(tab.title)) return <Music className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />;
+    if (isImageFile(tab.title)) return <ImageIcon className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />;
+    if (isVideoFile(tab.title)) return <Film className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />;
+    if (isKnownBinaryExtension(tab.title)) return <FileArchive className="w-3.5 h-3.5 text-slate-600 dark:text-zinc-300 shrink-0" />;
     if (['ts', 'tsx'].includes(ext)) return <Code2 className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />;
     if (['js', 'jsx'].includes(ext)) return <FileCode className="w-3.5 h-3.5 text-red-600 dark:text-red-400" />;
     if (['json'].includes(ext)) return <FileJson className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />;

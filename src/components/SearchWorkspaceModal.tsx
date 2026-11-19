@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, X, FileText, ChevronRight } from 'lucide-react';
+import { Search, X, FileText } from 'lucide-react';
 import { CloudFile } from '../types/ide';
+import { isKnownBinaryExtension, isPdfFile, isAudioFile, isVideoFile } from '../utils/fileSystem';
 
 interface SearchWorkspaceModalProps {
   isOpen: boolean;
@@ -46,7 +47,18 @@ export const SearchWorkspaceModal: React.FC<SearchWorkspaceModalProps> = ({
   const results: MatchResult[] = [];
   if (searchTerm.trim().length >= 2) {
     for (const file of files) {
-      if (file.isBinary || file.isDirectory || file.contentLoaded === false) continue;
+      if (
+        file.isBinary ||
+        file.encoding === 'base64' ||
+        file.isDirectory ||
+        file.contentLoaded === false ||
+        isPdfFile(file.name, file.mimeType) ||
+        isAudioFile(file.name, file.mimeType) ||
+        isVideoFile(file.name) ||
+        isKnownBinaryExtension(file.name)
+      ) {
+        continue;
+      }
       const lines = file.content.split('\n');
       lines.forEach((line, idx) => {
         const matches = isCaseSensitive

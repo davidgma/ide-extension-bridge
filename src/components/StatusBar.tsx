@@ -17,7 +17,15 @@ import {
   Lock,
 } from 'lucide-react';
 import { CloudFile, ExtensionStatus } from '../types/ide';
-import { getMonacoLanguage } from '../utils/fileSystem';
+import {
+  getMonacoLanguage,
+  isImageFile,
+  isVideoFile,
+  isAudioFile,
+  isPdfFile,
+  isKnownBinaryExtension,
+  formatFileSize,
+} from '../utils/fileSystem';
 
 interface StatusBarProps {
   activeFile: CloudFile | null;
@@ -41,6 +49,20 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   onOpenBridgeStatus,
 }) => {
   const language = activeFile ? getMonacoLanguage(activeFile.name) : 'plaintext';
+  const nonCodeViewerLabel = activeFile
+    ? isPdfFile(activeFile.name, activeFile.mimeType)
+      ? 'PDF Document'
+      : isAudioFile(activeFile.name, activeFile.mimeType)
+      ? 'Audio'
+      : isVideoFile(activeFile.name)
+      ? 'Video'
+      : isImageFile(activeFile.name)
+      ? 'Image'
+      : activeFile.isBinary || isKnownBinaryExtension(activeFile.name)
+      ? 'Binary'
+      : null
+    : null;
+  const formattedSize = activeFile ? formatFileSize(activeFile.size) : '';
 
   return (
     <footer className="h-6 bg-slate-100 dark:bg-[#18181b] border-t border-slate-200 dark:border-zinc-800 flex items-center justify-between px-3 text-[11px] select-auto text-slate-600 dark:text-zinc-400 font-mono z-20 shrink-0">
@@ -102,24 +124,40 @@ export const StatusBar: React.FC<StatusBarProps> = ({
         )}
       </div>
 
-      {/* Right: Editor metrics (shown when a file tab is active) */}
+      {/* Right: Editor or Viewer metrics (shown when a file tab is active) */}
       {activeFile && (
         <div className="flex items-center gap-4 shrink-0">
-          <div className="text-slate-700 dark:text-zinc-300">
-            <span>Ln {cursorPos.line}, Col {cursorPos.col}</span>
-            {selectionLength > 0 && (
-              <span className="text-slate-400 dark:text-zinc-500 ml-1">({selectionLength} sel)</span>
-            )}
-          </div>
+          {nonCodeViewerLabel ? (
+            <>
+              {formattedSize && (
+                <div className="text-slate-700 dark:text-zinc-300">{formattedSize}</div>
+              )}
+              <div className="hidden sm:block text-slate-600 dark:text-zinc-400">
+                {activeFile.encoding === 'base64' ? 'Base64' : 'Binary'}
+              </div>
+              <div className="text-blue-700 dark:text-blue-400 font-medium bg-white dark:bg-zinc-900 px-1.5 py-0.5 rounded border border-slate-200 dark:border-zinc-800">
+                {nonCodeViewerLabel}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-slate-700 dark:text-zinc-300">
+                <span>Ln {cursorPos.line}, Col {cursorPos.col}</span>
+                {selectionLength > 0 && (
+                  <span className="text-slate-400 dark:text-zinc-500 ml-1">({selectionLength} sel)</span>
+                )}
+              </div>
 
-          <div className="hidden sm:block text-slate-600 dark:text-zinc-400">Spaces: {tabSize}</div>
-          <div className="hidden sm:block text-slate-600 dark:text-zinc-400">
-            {activeFile.encoding === 'base64' ? 'Base64' : 'UTF-8'}
-          </div>
+              <div className="hidden sm:block text-slate-600 dark:text-zinc-400">Spaces: {tabSize}</div>
+              <div className="hidden sm:block text-slate-600 dark:text-zinc-400">
+                {activeFile.encoding === 'base64' ? 'Base64' : 'UTF-8'}
+              </div>
 
-          <div className="capitalize text-emerald-700 dark:text-emerald-400 font-medium bg-white dark:bg-zinc-900 px-1.5 py-0.5 rounded border border-slate-200 dark:border-zinc-800">
-            {language}
-          </div>
+              <div className="capitalize text-emerald-700 dark:text-emerald-400 font-medium bg-white dark:bg-zinc-900 px-1.5 py-0.5 rounded border border-slate-200 dark:border-zinc-800">
+                {language}
+              </div>
+            </>
+          )}
         </div>
       )}
     </footer>

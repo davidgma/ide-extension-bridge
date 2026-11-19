@@ -65,10 +65,60 @@ export function inferMimeType(filename: string): string {
       return 'image/gif';
     case 'webp':
       return 'image/webp';
+    case 'bmp':
+      return 'image/bmp';
+    case 'ico':
+      return 'image/x-icon';
     case 'mp4':
       return 'video/mp4';
     case 'webm':
       return 'video/webm';
+    case 'mov':
+      return 'video/quicktime';
+    case 'ogg':
+      return 'video/ogg';
+    case 'mp3':
+      return 'audio/mpeg';
+    case 'wav':
+      return 'audio/wav';
+    case 'flac':
+      return 'audio/flac';
+    case 'aac':
+      return 'audio/aac';
+    case 'm4a':
+      return 'audio/mp4';
+    case 'oga':
+    case 'opus':
+      return 'audio/ogg';
+    case 'aiff':
+      return 'audio/aiff';
+    case 'pdf':
+      return 'application/pdf';
+    case 'zip':
+      return 'application/zip';
+    case 'gz':
+    case 'tgz':
+      return 'application/gzip';
+    case 'tar':
+      return 'application/x-tar';
+    case '7z':
+      return 'application/x-7z-compressed';
+    case 'rar':
+      return 'application/vnd.rar';
+    case 'doc':
+      return 'application/msword';
+    case 'docx':
+      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    case 'xls':
+      return 'application/vnd.ms-excel';
+    case 'xlsx':
+      return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    case 'ppt':
+      return 'application/vnd.ms-powerpoint';
+    case 'pptx':
+      return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+    case 'wasm':
+      return 'application/wasm';
     default:
       return 'text/plain';
   }
@@ -76,15 +126,16 @@ export function inferMimeType(filename: string): string {
 
 export function getMonacoLanguage(filename: string): string {
   const ext = getFileExtension(filename);
+  const lowerName = filename.toLowerCase();
+  if (lowerName === 'dockerfile') return 'dockerfile';
+
   switch (ext) {
     case 'ts':
-      return 'typescript';
     case 'tsx':
       return 'typescript';
     case 'js':
     case 'mjs':
     case 'cjs':
-      return 'javascript';
     case 'jsx':
       return 'javascript';
     case 'json':
@@ -116,8 +167,15 @@ export function getMonacoLanguage(filename: string): string {
     case 'hpp':
     case 'cc':
       return 'cpp';
+    case 'cs':
+      return 'csharp';
     case 'java':
       return 'java';
+    case 'kt':
+    case 'kts':
+      return 'kotlin';
+    case 'swift':
+      return 'swift';
     case 'go':
       return 'go';
     case 'rs':
@@ -126,8 +184,12 @@ export function getMonacoLanguage(filename: string): string {
     case 'bash':
     case 'zsh':
       return 'shell';
+    case 'ps1':
+      return 'powershell';
+    case 'bat':
+    case 'cmd':
+      return 'bat';
     case 'xml':
-      return 'xml';
     case 'svg':
       return 'xml';
     case 'dockerfile':
@@ -139,8 +201,15 @@ export function getMonacoLanguage(filename: string): string {
       return 'php';
     case 'rb':
       return 'ruby';
+    case 'lua':
+      return 'lua';
+    case 'r':
+      return 'r';
     case 'ini':
     case 'conf':
+    case 'toml':
+    case 'env':
+    case 'properties':
       return 'ini';
     default:
       return 'plaintext';
@@ -157,9 +226,125 @@ export function isVideoFile(filename: string): boolean {
   return ['mp4', 'webm', 'ogg', 'mov'].includes(ext);
 }
 
+export function isAudioFile(filename: string, mimeType?: string): boolean {
+  if (mimeType && mimeType.toLowerCase().startsWith('audio/')) {
+    return true;
+  }
+  const ext = getFileExtension(filename);
+  return ['mp3', 'wav', 'flac', 'aac', 'm4a', 'oga', 'opus', 'wma', 'aiff'].includes(ext);
+}
+
+export function isPdfFile(filename: string, mimeType?: string): boolean {
+  if (mimeType && mimeType.toLowerCase() === 'application/pdf') {
+    return true;
+  }
+  return getFileExtension(filename) === 'pdf';
+}
+
 export function isMarkdownFile(filename: string): boolean {
   const ext = getFileExtension(filename);
   return ['md', 'markdown'].includes(ext);
+}
+
+const KNOWN_BINARY_EXTENSIONS = new Set([
+  // Images (svg excluded because it is UTF-8 XML text)
+  'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'tiff', 'tif', 'avif', 'heic',
+  // Video & Audio
+  'mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv', 'm4v',
+  'mp3', 'wav', 'flac', 'aac', 'm4a', 'oga', 'opus', 'wma', 'aiff',
+  // Documents & Books
+  'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods', 'odp', 'epub',
+  // Archives & Packages
+  'zip', 'tar', 'gz', 'tgz', 'bz2', '7z', 'rar', 'xz', 'jar', 'war',
+  // Binaries, Fonts, Databases
+  'exe', 'dll', 'so', 'dylib', 'bin', 'dmg', 'iso', 'img', 'msi', 'deb', 'rpm', 'apk', 'wasm',
+  'class', 'pyc', 'o', 'woff', 'woff2', 'ttf', 'otf', 'eot', 'db', 'sqlite', 'sqlite3',
+]);
+
+export function isKnownBinaryExtension(filename: string): boolean {
+  return KNOWN_BINARY_EXTENSIONS.has(getFileExtension(filename));
+}
+
+/**
+ * Determines whether a file should be requested from Clockie H2 using base64 encoding.
+ * Explicitly returns true for PDFs, audio, video, raster images, and common binary formats
+ * even if directory tree metadata did not flag encoding/contentType in advance.
+ */
+export function shouldRequestBase64(file: {
+  name: string;
+  isBinary?: boolean;
+  encoding?: 'utf-8' | 'base64';
+  mimeType?: string;
+}): boolean {
+  if (file.encoding === 'base64' || file.isBinary) return true;
+  if (isPdfFile(file.name, file.mimeType)) return true;
+  if (isAudioFile(file.name, file.mimeType)) return true;
+  if (isVideoFile(file.name)) return true;
+  if (isImageFile(file.name) && getFileExtension(file.name) !== 'svg') return true;
+  return isKnownBinaryExtension(file.name);
+}
+
+/**
+ * Heuristic check to prevent accidental raw binary dumps in Monaco if a binary file lacks a known extension.
+ */
+export function looksLikeBinaryContent(content: string | undefined): boolean {
+  if (!content) return false;
+  const sample = content.slice(0, 4096);
+  if (sample.includes('\u0000')) return true;
+  let controlCount = 0;
+  for (let i = 0; i < sample.length; i++) {
+    const code = sample.charCodeAt(i);
+    // Count non-printable control characters excluding tab (9), LF (10), CR (13)
+    if (code < 32 && code !== 9 && code !== 10 && code !== 13) {
+      controlCount++;
+    }
+  }
+  return sample.length > 0 && controlCount / sample.length > 0.05;
+}
+
+/**
+ * Converts a base64 string (or data:...;base64,... URL) into a typed Blob for safe object URL rendering/downloading.
+ */
+export function base64ToBlob(base64OrDataUrl: string, mimeType = 'application/octet-stream'): Blob | null {
+  try {
+    let rawBase64 = base64OrDataUrl.trim();
+    let resolvedMime = mimeType;
+    if (rawBase64.startsWith('data:')) {
+      const commaIdx = rawBase64.indexOf(',');
+      if (commaIdx < 0) return null;
+      const header = rawBase64.slice(5, commaIdx);
+      const mimeMatch = header.match(/^([^;]+)/);
+      if (mimeMatch?.[1]) {
+        resolvedMime = mimeMatch[1];
+      }
+      rawBase64 = rawBase64.slice(commaIdx + 1);
+    }
+    const cleanBase64 = rawBase64.replace(/\s+/g, '');
+    if (!cleanBase64) return null;
+
+    const binaryString = window.atob(cleanBase64);
+    const len = binaryString.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    return new Blob([bytes], { type: resolvedMime || 'application/octet-stream' });
+  } catch {
+    return null;
+  }
+}
+
+export function formatFileSize(bytes?: number): string {
+  if (typeof bytes !== 'number' || Number.isNaN(bytes) || bytes < 0) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let value = bytes / 1024;
+  let idx = 0;
+  while (value >= 1024 && idx < units.length - 1) {
+    value /= 1024;
+    idx++;
+  }
+  return `${value.toFixed(value >= 10 ? 1 : 2)} ${units[idx]}`;
 }
 
 export function buildFileTree(files: CloudFile[]): FileTreeNode[] {

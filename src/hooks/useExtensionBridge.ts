@@ -40,7 +40,11 @@ import {
   H2MoveFileRes,
   H2MoveFolderRes,
 } from '../utils/h2BridgeClient';
-import { inferMimeType } from '../utils/fileSystem';
+import {
+  inferMimeType,
+  isKnownBinaryExtension,
+  shouldRequestBase64,
+} from '../utils/fileSystem';
 
 export interface H2MoveErrorInfo {
   itemType: 'file' | 'folder';
@@ -139,7 +143,10 @@ function mapTreePayloadToCloudFiles(
     if (seenKeys.has(key)) return;
     seenKeys.add(key);
 
-    const isBin = file.contentType === 'binary' || file.encoding === 'base64';
+    const isBin =
+      file.contentType === 'binary' ||
+      file.encoding === 'base64' ||
+      isKnownBinaryExtension(file.name);
     fileItems.push({
       id: file.fileId ? `${provider}:${String(file.fileId)}` : `h2-${provider}-${file.relativePath}`,
       cloudFileId: file.fileId,
@@ -153,7 +160,7 @@ function mapTreePayloadToCloudFiles(
       driveRoot: effectiveDriveRoot,
       isDirectory: false,
       cloudProvider: provider,
-      mimeType: file.mimeType,
+      mimeType: file.mimeType || inferMimeType(file.name),
       contentType: file.contentType,
       encoding: file.encoding,
       size: file.sizeBytes,
@@ -849,8 +856,8 @@ export function useExtensionBridge({
       const client = clientRef.current;
       if (!client) return;
 
-      const inferredEncoding: 'utf-8' | 'base64' | undefined =
-        encodingOverride || file.encoding || (file.isBinary ? 'base64' : 'utf-8');
+      const inferredEncoding: 'utf-8' | 'base64' =
+        encodingOverride || (shouldRequestBase64(file) ? 'base64' : file.encoding || 'utf-8');
       const useDriveRoot = Boolean(file.driveRoot ?? handshakeInfo?.driveRootActive);
 
       try {
@@ -861,11 +868,14 @@ export function useExtensionBridge({
           file.cloudProvider,
           useDriveRoot
         );
-        const isBinary = res.contentType === 'binary' || res.encoding === 'base64';
         const resolvedMime = res.mimeType || file.mimeType || inferMimeType(file.name);
+        const isBinary =
+          res.contentType === 'binary' ||
+          res.encoding === 'base64' ||
+          isKnownBinaryExtension(file.name);
 
         let binaryUrl: string | undefined;
-        if (isBinary && res.content) {
+        if (res.content && (res.encoding === 'base64' || res.contentType === 'binary')) {
           binaryUrl = res.content.startsWith('data:')
             ? res.content
             : `data:${resolvedMime || 'application/octet-stream'};base64,${res.content}`;
@@ -909,7 +919,7 @@ export function useExtensionBridge({
         filesToRead.map(f => ({
           relativePath: f.path,
           fileId: f.cloudFileId,
-          encoding: f.encoding || (f.isBinary ? 'base64' : 'utf-8'),
+          encoding: shouldRequestBase64(f) ? 'base64' : f.encoding || 'utf-8',
           provider: f.cloudProvider,
           driveRoot: Boolean(f.driveRoot ?? handshakeInfo?.driveRootActive),
         }))
@@ -917,10 +927,13 @@ export function useExtensionBridge({
 
       responses.forEach((res, idx) => {
         const orig = filesToRead[idx];
-        const isBinary = res.contentType === 'binary' || res.encoding === 'base64';
         const resolvedMime = res.mimeType || orig.mimeType || inferMimeType(orig.name);
+        const isBinary =
+          res.contentType === 'binary' ||
+          res.encoding === 'base64' ||
+          isKnownBinaryExtension(orig.name);
         let binaryUrl: string | undefined;
-        if (isBinary && res.content) {
+        if (res.content && (res.encoding === 'base64' || res.contentType === 'binary')) {
           binaryUrl = res.content.startsWith('data:')
             ? res.content
             : `data:${resolvedMime || 'application/octet-stream'};base64,${res.content}`;

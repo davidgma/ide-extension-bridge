@@ -24,6 +24,8 @@ import {
   Database,
   Image as ImageIcon,
   Film,
+  Music,
+  FileArchive,
   Plus,
   FolderPlus,
   Upload,
@@ -42,7 +44,15 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { CloudFile, FileTreeNode, CloudProvider, H2DriveStatus, H2LaunchedScope } from '../types/ide';
-import { getFileExtension, isImageFile, isVideoFile, buildFileTree } from '../utils/fileSystem';
+import {
+  getFileExtension,
+  isImageFile,
+  isVideoFile,
+  isAudioFile,
+  isPdfFile,
+  isKnownBinaryExtension,
+  buildFileTree,
+} from '../utils/fileSystem';
 
 export interface SidebarFolderActionSignal {
   action: 'collapse' | 'expand-lazy' | 'expand-full';
@@ -333,8 +343,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const getFileIcon = (filename: string) => {
     const ext = getFileExtension(filename);
+    if (isPdfFile(filename)) return <FileText className="w-3.5 h-3.5 text-red-600 dark:text-red-400 shrink-0" />;
+    if (isAudioFile(filename)) return <Music className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />;
     if (isImageFile(filename)) return <ImageIcon className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />;
     if (isVideoFile(filename)) return <Film className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />;
+    if (isKnownBinaryExtension(filename)) return <FileArchive className="w-3.5 h-3.5 text-slate-600 dark:text-zinc-300 shrink-0" />;
     if (['ts', 'tsx'].includes(ext)) return <Code2 className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />;
     if (['js', 'jsx'].includes(ext)) return <FileCode className="w-3.5 h-3.5 text-red-600 dark:text-red-400 shrink-0" />;
     if (['json'].includes(ext)) return <FileJson className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />;
