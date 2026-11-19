@@ -29,14 +29,14 @@ import { useExtensionBridge } from './hooks/useExtensionBridge';
 import { useDynamicFavicon } from './hooks/useDynamicFavicon';
 import { useIdeSettings } from './hooks/useIdeSettings';
 import { MenuBar } from './components/MenuBar';
-import { Sidebar } from './components/Sidebar';
+import { Sidebar, SidebarFolderActionSignal } from './components/Sidebar';
 import { TabsBar } from './components/TabsBar';
 import { EditorArea } from './components/EditorArea';
 import { ExtensionBridgeStatusPage } from './components/ExtensionBridgeStatusPage';
 import { ExtensionDebuggerPage } from './components/ExtensionDebuggerPage';
 import { PreferencesPage } from './components/PreferencesPage';
 import { StatusBar } from './components/StatusBar';
-import { QuickOpenModal } from './components/QuickOpenModal';
+import { CommandPaletteModal, IdeCommand } from './components/CommandPaletteModal';
 import { SearchWorkspaceModal } from './components/SearchWorkspaceModal';
 import { ShortcutsModal } from './components/ShortcutsModal';
 import { AboutModal } from './components/AboutModal';
@@ -69,15 +69,17 @@ export default function App() {
   const minimap = settings.minimap;
   const isSidebarOpen = settings.sidebarOpen;
 
-  // State: Resizable sidebar drag status
+  // State: Resizable sidebar drag status & folder expand/collapse trigger
   const [isResizingSidebar, setIsResizingSidebar] = useState(false);
+  const [folderActionSignal, setFolderActionSignal] = useState<SidebarFolderActionSignal | null>(null);
 
   // State: Cursor telemetry
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
   const [selectionLength, setSelectionLength] = useState(0);
 
-  // State: Modals
-  const [isQuickOpenOpen, setIsQuickOpenOpen] = useState(false);
+  // State: Modals & Unified Command Palette / Quick Open
+  const [isPaletteOpen, setIsPaletteOpen] = useState(false);
+  const [paletteInitialMode, setPaletteInitialMode] = useState<'files' | 'commands'>('files');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
@@ -882,73 +884,82 @@ export default function App() {
     [isReadOnly, canCreateFiles, selectedDrive, cloudProvider, handshakeInfo?.driveRootActive, notify]
   );
 
-  // Export workspace as JSON
-  const handleExportWorkspace = useCallback(() => {
-    const exportData = {
-      workspace: workspaceName,
-      domain: 'ide.freshfood.rocks',
-      protocol: 'H2_CLOUD_BRIDGE',
-      protocolVersion: '1.3',
-      exportedAt: new Date().toISOString(),
-      provider: cloudProvider,
-      files: files
-        .filter(f => !f.isDirectory)
-        .map(f => ({
-          path: f.path,
-          name: f.name,
-          contentLoaded: f.contentLoaded !== false,
-          content: f.content,
-          cloudProvider: f.cloudProvider,
-        })),
-    };
-    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `freshfood-monarch-workspace-${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    notify('Workspace JSON exported');
-  }, [workspaceName, cloudProvider, files, notify]);
+  const openQuickOpen = useCallback(() => {
+    setPaletteInitialMode('files');
+    setIsPaletteOpen(true);
+  }, []);
 
-  // Global keybindings
+  const openCommandPalette = useCallback(() => {
+    setPaletteInitialMode('commands');
+    setIsPaletteOpen(true);
+  }, []);
+
+  const triggerSidebarFolderAction = useCallback(
+    (action: 'collapse' | 'expand-lazy' | 'expand-full') => {
+      updateSettings({ sidebarOpen: true });
+      setFolderActionSignal({ action, nonce: Date.now() + Math.random() });
+    },
+    [updateSettings]
+  );
+
+  // Global keybindings (capture phase ensures F1 and Ctrl+Shift+P work even when Monaco Editor has focus)
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       const isCmdOrCtrl = e.metaKey || e.ctrlKey;
 
-      if (isCmdOrCtrl && e.key.toLowerCase() === 's') {
+      if (isCmdOrCtrl && !e.shiftKey && e.key.toLowerCase() === 's') {
         e.preventDefault();
         handleSaveCurrent();
+        return;
       }
 
-      if (isCmdOrCtrl && e.key.toLowerCase() === 'p') {
+      if (isCmdOrCtrl && e.shiftKey && e.key.toLowerCase() === 'p') {
         e.preventDefault();
-        setIsQuickOpenOpen(true);
+        e.stopPropagation();
+        openCommandPalette();
+        return;
+      }
+
+      if (e.key === 'F1') {
+        e.preventDefault();
+        e.stopPropagation();
+        openCommandPalette();
+        return;
+      }
+
+      if (isCmdOrCtrl && !e.shiftKey && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        openQuickOpen();
+        return;
       }
 
       if (isCmdOrCtrl && e.shiftKey && e.key.toLowerCase() === 'f') {
         e.preventDefault();
         setIsSearchOpen(true);
+        return;
       }
 
-      if (isCmdOrCtrl && e.key.toLowerCase() === 'b') {
+      if (isCmdOrCtrl && !e.shiftKey && e.key.toLowerCase() === 'b') {
         e.preventDefault();
         updateSettings({ sidebarOpen: !isSidebarOpen });
+        return;
       }
 
       if (isCmdOrCtrl && e.key === ',') {
         e.preventDefault();
         handleOpenPreferences();
+        return;
       }
 
       if (isCmdOrCtrl && !e.shiftKey && e.key.toLowerCase() === 'w' && activeTabId) {
         e.preventDefault();
         handleCloseTab(activeTabId);
+        return;
       }
 
       if (
         e.key === 'Escape' &&
-        !isQuickOpenOpen &&
+        !isPaletteOpen &&
         !isSearchOpen &&
         !isShortcutsOpen &&
         !isAboutOpen &&
@@ -963,16 +974,18 @@ export default function App() {
       }
     };
 
-    window.addEventListener('keydown', handleGlobalKeyDown);
-    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+    window.addEventListener('keydown', handleGlobalKeyDown, true);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown, true);
   }, [
     handleSaveCurrent,
+    openCommandPalette,
+    openQuickOpen,
     updateSettings,
     isSidebarOpen,
     handleOpenPreferences,
     activeTabId,
     handleCloseTab,
-    isQuickOpenOpen,
+    isPaletteOpen,
     isSearchOpen,
     isShortcutsOpen,
     isAboutOpen,
@@ -980,10 +993,224 @@ export default function App() {
     isImportPrefsOpen,
   ]);
 
+  // Unified IDE Command list for Command Palette (Ctrl+Shift+P / F1 / >)
+  const ideCommands = useMemo<IdeCommand[]>(
+    () => [
+      {
+        id: 'file.quickOpen',
+        category: 'File',
+        label: 'Quick Open...',
+        shortcut: 'Ctrl+P',
+        action: openQuickOpen,
+      },
+      {
+        id: 'file.save',
+        category: 'File',
+        label: 'Save Active File',
+        shortcut: 'Ctrl+S',
+        disabled: !activeFile || isSaving || isReadOnly || !canSave,
+        action: handleSaveCurrent,
+      },
+      {
+        id: 'file.saveAll',
+        category: 'File',
+        label: `Save All Modified Files${dirtyFilesCount > 0 ? ` (${dirtyFilesCount})` : ''}`,
+        disabled: dirtyFilesCount === 0 || isSaving || isReadOnly || !canSave,
+        action: handleSaveAll,
+      },
+      {
+        id: 'file.closeTab',
+        category: 'File',
+        label: 'Close Active Editor Tab',
+        shortcut: 'Ctrl+W',
+        disabled: !activeTabId,
+        action: () => activeTabId && handleCloseTab(activeTabId),
+      },
+      {
+        id: 'file.closeAllTabs',
+        category: 'File',
+        label: 'Close All Editor Tabs',
+        disabled: openTabs.length === 0,
+        action: handleCloseAllTabs,
+      },
+      {
+        id: 'edit.preferences',
+        category: 'Edit',
+        label: 'Open Preferences',
+        shortcut: 'Ctrl+,',
+        action: handleOpenPreferences,
+      },
+      {
+        id: 'view.toggleSidebar',
+        category: 'View',
+        label: 'Toggle Primary Side Bar',
+        shortcut: 'Ctrl+B',
+        active: isSidebarOpen,
+        action: () => updateSettings({ sidebarOpen: !isSidebarOpen }),
+      },
+      {
+        id: 'view.searchWorkspace',
+        category: 'View',
+        label: 'Search Workspace...',
+        shortcut: 'Ctrl+Shift+F',
+        action: () => setIsSearchOpen(true),
+      },
+      {
+        id: 'view.toggleWordWrap',
+        category: 'View',
+        label: 'Toggle Word Wrap',
+        active: wordWrap,
+        action: () => updateSettings({ wordWrap: !wordWrap }),
+      },
+      {
+        id: 'view.toggleMinimap',
+        category: 'View',
+        label: 'Toggle Code Minimap',
+        active: minimap,
+        action: () => updateSettings({ minimap: !minimap }),
+      },
+      {
+        id: 'view.expandFoldersLazy',
+        category: 'View',
+        label: 'Expand All Folders - Lazy (Loaded Only)',
+        action: () => triggerSidebarFolderAction('expand-lazy'),
+      },
+      {
+        id: 'view.expandFoldersFull',
+        category: 'View',
+        label: 'Expand All Folders - Full (Load Nested)',
+        action: () => triggerSidebarFolderAction('expand-full'),
+      },
+      {
+        id: 'view.collapseFolders',
+        category: 'View',
+        label: 'Collapse All Folders',
+        action: () => triggerSidebarFolderAction('collapse'),
+      },
+      {
+        id: 'bridge.status',
+        category: 'Bridge',
+        label: 'Open Extension Bridge Status',
+        action: handleOpenBridgeStatus,
+      },
+      {
+        id: 'bridge.debugger',
+        category: 'Bridge',
+        label: 'Show Extension Bridge Debugger',
+        action: handleOpenBridgeDebugger,
+      },
+      {
+        id: 'bridge.connect',
+        category: 'Bridge',
+        label: 'Connect to Clockie H2 Bridge',
+        disabled: extensionStatus === 'connected',
+        action: () => startBridge(),
+      },
+      {
+        id: 'bridge.disconnect',
+        category: 'Bridge',
+        label: 'Disconnect Bridge Session',
+        disabled: extensionStatus === 'disconnected',
+        action: stopBridge,
+      },
+      {
+        id: 'bridge.refreshTree',
+        category: 'Bridge',
+        label: 'Refresh Workspace Tree',
+        disabled: extensionStatus !== 'connected',
+        action: handleRefreshTree,
+      },
+      {
+        id: 'preferences.lightMode',
+        category: 'Preferences',
+        label: 'Switch Color Theme to Light Mode',
+        active: settings.colorMode === 'light',
+        action: () => {
+          setColorMode('light');
+          notify('Switched to Light mode');
+        },
+      },
+      {
+        id: 'preferences.darkMode',
+        category: 'Preferences',
+        label: 'Switch Color Theme to Dark Mode',
+        active: settings.colorMode === 'dark',
+        action: () => {
+          setColorMode('dark');
+          notify('Switched to Dark mode');
+        },
+      },
+      {
+        id: 'preferences.exportJson',
+        category: 'Preferences',
+        label: 'Export Preferences to JSON...',
+        action: () => setIsExportPrefsOpen(true),
+      },
+      {
+        id: 'preferences.importJson',
+        category: 'Preferences',
+        label: 'Import Preferences from JSON...',
+        action: () => setIsImportPrefsOpen(true),
+      },
+      {
+        id: 'preferences.reset',
+        category: 'Preferences',
+        label: 'Reset Preferences to Defaults',
+        action: () => {
+          resetSettings();
+          notify('Preferences reset to defaults');
+        },
+      },
+      {
+        id: 'help.shortcuts',
+        category: 'Help',
+        label: 'Shortcuts and Docs',
+        action: () => setIsShortcutsOpen(true),
+      },
+      {
+        id: 'help.about',
+        category: 'Help',
+        label: 'About Monarch IDE',
+        action: () => setIsAboutOpen(true),
+      },
+    ],
+    [
+      openQuickOpen,
+      activeFile,
+      isSaving,
+      isReadOnly,
+      canSave,
+      handleSaveCurrent,
+      dirtyFilesCount,
+      handleSaveAll,
+      activeTabId,
+      handleCloseTab,
+      openTabs.length,
+      handleCloseAllTabs,
+      handleOpenPreferences,
+      isSidebarOpen,
+      updateSettings,
+      wordWrap,
+      minimap,
+      triggerSidebarFolderAction,
+      handleOpenBridgeStatus,
+      handleOpenBridgeDebugger,
+      extensionStatus,
+      startBridge,
+      stopBridge,
+      handleRefreshTree,
+      settings.colorMode,
+      setColorMode,
+      notify,
+      resetSettings,
+    ]
+  );
+
   return (
     <div className="h-screen w-screen flex flex-col bg-slate-50 dark:bg-[#18181b] text-slate-900 dark:text-zinc-200 select-auto overflow-hidden">
-      {/* Always-Visible Main Menu Bar (Single Top Header Row) */}
+      {/* Always-Visible Main Menu Bar + Centered Command Palette Bar */}
       <MenuBar
+        workspaceName={workspaceName}
         hasActiveFile={Boolean(activeFile)}
         dirtyFilesCount={dirtyFilesCount}
         isSaving={isSaving}
@@ -992,7 +1219,8 @@ export default function App() {
         sidebarOpen={isSidebarOpen}
         wordWrap={wordWrap}
         minimap={minimap}
-        onOpenQuickOpen={() => setIsQuickOpenOpen(true)}
+        onOpenCommandPalette={openCommandPalette}
+        onOpenQuickOpen={openQuickOpen}
         onSaveCurrent={handleSaveCurrent}
         onSaveAll={handleSaveAll}
         onOpenPreferences={handleOpenPreferences}
@@ -1050,6 +1278,8 @@ export default function App() {
                 canCreateFolders={canCreateFolders}
                 canDeleteFiles={canDeleteFiles}
                 canDeleteFolders={canDeleteFolders}
+                defaultFoldersExpanded={settings.sidebarDefaultFoldersExpanded}
+                folderActionSignal={folderActionSignal}
                 drives={handshakeInfo?.drives}
                 selectedDrive={selectedDrive}
                 launchedScope={handshakeInfo?.launchedScope}
@@ -1065,7 +1295,6 @@ export default function App() {
                 onDeleteFolder={handleDeleteFolder}
                 onRenameFile={handleRenameFile}
                 onUploadFiles={handleUploadFiles}
-                onExportWorkspace={handleExportWorkspace}
               />
             </div>
 
@@ -1168,7 +1397,8 @@ export default function App() {
                 onSaveFile={saveCloudFile}
                 onRetryLoadFile={handleRetryLoadFile}
                 onCursorChange={handleCursorChange}
-                onOpenQuickOpen={() => setIsQuickOpenOpen(true)}
+                onOpenQuickOpen={openQuickOpen}
+                onOpenCommandPalette={openCommandPalette}
                 onOpenSearch={() => setIsSearchOpen(true)}
                 onOpenFile={handleSelectFile}
                 files={files}
@@ -1190,11 +1420,13 @@ export default function App() {
         onOpenBridgeStatus={handleOpenBridgeStatus}
       />
 
-      {/* Quick Open (Cmd+P) Modal */}
-      <QuickOpenModal
-        isOpen={isQuickOpenOpen}
+      {/* Unified Quick Open (Ctrl+P) & Command Palette (Ctrl+Shift+P / F1 / >) Modal */}
+      <CommandPaletteModal
+        isOpen={isPaletteOpen}
+        initialMode={paletteInitialMode}
         files={files}
-        onClose={() => setIsQuickOpenOpen(false)}
+        commands={ideCommands}
+        onClose={() => setIsPaletteOpen(false)}
         onSelectFile={handleSelectFile}
       />
 

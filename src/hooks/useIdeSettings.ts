@@ -56,6 +56,7 @@ export function createDefaultIdeSettings(date = new Date()): IdeSettings {
     minimap: true,
     sidebarWidth: 260,
     sidebarOpen: true,
+    sidebarDefaultFoldersExpanded: false,
     preferencesExportProvider: 'pcloud',
     preferencesExportFolder: `${getCurrentYearString(date)}/downloads`,
     preferencesExportFilename: buildDatedPreferencesFilename(date),
@@ -138,6 +139,10 @@ export function normalizeIdeSettings(raw: unknown): IdeSettings {
         ? input.sidebarWidth
         : defaults.sidebarWidth,
     sidebarOpen: typeof input.sidebarOpen === 'boolean' ? input.sidebarOpen : defaults.sidebarOpen,
+    sidebarDefaultFoldersExpanded:
+      typeof input.sidebarDefaultFoldersExpanded === 'boolean'
+        ? input.sidebarDefaultFoldersExpanded
+        : defaults.sidebarDefaultFoldersExpanded,
     preferencesExportProvider:
       typeof input.preferencesExportProvider === 'string' && input.preferencesExportProvider.trim()
         ? input.preferencesExportProvider.trim()

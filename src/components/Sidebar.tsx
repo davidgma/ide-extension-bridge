@@ -9,7 +9,7 @@
  * - Lucide React Icons: https://lucide.dev/guide/packages/lucide-react
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Folder,
   FolderOpen,
@@ -25,10 +25,12 @@ import {
   Plus,
   FolderPlus,
   Upload,
-  Download,
   Search,
   ChevronRight,
   ChevronDown,
+  ChevronsUpDown,
+  ChevronsDownUp,
+  FolderTree,
   Trash2,
   Edit2,
   HardDrive,
@@ -38,6 +40,11 @@ import {
 } from 'lucide-react';
 import { CloudFile, FileTreeNode, CloudProvider, H2DriveStatus, H2LaunchedScope } from '../types/ide';
 import { getFileExtension, isImageFile, isVideoFile, buildFileTree } from '../utils/fileSystem';
+
+export interface SidebarFolderActionSignal {
+  action: 'collapse' | 'expand-lazy' | 'expand-full';
+  nonce: number;
+}
 
 interface SidebarProps {
   files: CloudFile[];
@@ -50,6 +57,8 @@ interface SidebarProps {
   canCreateFolders: boolean;
   canDeleteFiles: boolean;
   canDeleteFolders: boolean;
+  defaultFoldersExpanded?: boolean;
+  folderActionSignal?: SidebarFolderActionSignal | null;
   drives?: Record<string, H2DriveStatus>;
   selectedDrive?: CloudProvider;
   launchedScope?: H2LaunchedScope | null;
@@ -65,7 +74,6 @@ interface SidebarProps {
   onDeleteFolder: (folderPath: string, folderId?: string, folderProvider?: CloudProvider) => void;
   onRenameFile: (fileId: string, newPath: string) => void;
   onUploadFiles: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  onExportWorkspace: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -79,6 +87,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   canCreateFolders,
   canDeleteFiles,
   canDeleteFolders,
+  defaultFoldersExpanded = false,
+  folderActionSignal = null,
   drives,
   selectedDrive,
   launchedScope,
@@ -94,11 +104,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onDeleteFolder,
   onRenameFile,
   onUploadFiles,
-  onExportWorkspace,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
-  const [expandedLazyFolders, setExpandedLazyFolders] = useState<Record<string, boolean>>({});
+  const [folderOpenOverrides, setFolderOpenOverrides] = useState<Record<string, boolean>>({});
+  const [isFullExpanding, setIsFullExpanding] = useState(false);
+  const fullExpandCountRef = useRef(0);
   const [showNewFileInput, setShowNewFileInput] = useState(false);
   const [showNewFolderInput, setShowNewFolderInput] = useState(false);
   const [newPathInput, setNewPathInput] = useState('');
@@ -127,24 +137,121 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const fileTree = React.useMemo(() => buildFileTree(filteredFiles), [filteredFiles]);
 
+  // Reset folder overrides when default folder state preference, provider, or workspace changes
+  useEffect(() => {
+    setFolderOpenOverrides({});
+    setIsFullExpanding(false);
+    fullExpandCountRef.current = 0;
+  }, [defaultFoldersExpanded, cloudProvider, workspaceName]);
+
+  const isFolderCurrentlyExpanded = useCallback(
+    (node: FileTreeNode): boolean => {
+      if (Object.prototype.hasOwnProperty.call(folderOpenOverrides, node.path)) {
+        return folderOpenOverrides[node.path];
+      }
+      if (node.file?.childrenLoaded === false) {
+        return false;
+      }
+      return defaultFoldersExpanded;
+    },
+    [folderOpenOverrides, defaultFoldersExpanded]
+  );
+
+  // Progressively expand and fetch nested unloaded lazy folders when "Expand All - Full" is active
+  useEffect(() => {
+    if (!isFullExpanding) return;
+
+    const unloadedFolders = files.filter(
+      f => f.isDirectory && f.childrenLoaded === false && !f.isLoadingChildren
+    );
+    const anyLoading = files.some(f => f.isDirectory && f.isLoadingChildren);
+
+    if (unloadedFolders.length > 0 && fullExpandCountRef.current < 40) {
+      const remainingBudget = 40 - fullExpandCountRef.current;
+      const batch = unloadedFolders.slice(0, Math.min(6, remainingBudget));
+      fullExpandCountRef.current += batch.length;
+
+      setFolderOpenOverrides(prev => {
+        const next = { ...prev };
+        batch.forEach(folder => {
+          next[folder.path] = true;
+        });
+        return next;
+      });
+
+      batch.forEach(folder => {
+        onExpandFolder(folder);
+      });
+    } else if (!anyLoading) {
+      setIsFullExpanding(false);
+    }
+  }, [isFullExpanding, files, onExpandFolder]);
+
+  const handleCollapseAll = useCallback(() => {
+    setIsFullExpanding(false);
+    fullExpandCountRef.current = 0;
+    const next: Record<string, boolean> = {};
+    files.forEach(item => {
+      if (item.isDirectory) {
+        next[item.path] = false;
+      }
+    });
+    setFolderOpenOverrides(next);
+  }, [files]);
+
+  const handleExpandAllLazy = useCallback(() => {
+    setIsFullExpanding(false);
+    fullExpandCountRef.current = 0;
+    const next: Record<string, boolean> = {};
+    files.forEach(item => {
+      if (item.isDirectory && item.childrenLoaded !== false) {
+        next[item.path] = true;
+      }
+    });
+    setFolderOpenOverrides(next);
+  }, [files]);
+
+  const handleExpandAllFull = useCallback(() => {
+    const next: Record<string, boolean> = {};
+    files.forEach(item => {
+      if (item.isDirectory) {
+        next[item.path] = true;
+      }
+    });
+    setFolderOpenOverrides(next);
+    fullExpandCountRef.current = 0;
+    setIsFullExpanding(true);
+  }, [files]);
+
+  // Allow Command Palette actions to trigger Sidebar expand/collapse directly
+  useEffect(() => {
+    if (!folderActionSignal) return;
+    if (folderActionSignal.action === 'collapse') {
+      handleCollapseAll();
+    } else if (folderActionSignal.action === 'expand-lazy') {
+      handleExpandAllLazy();
+    } else if (folderActionSignal.action === 'expand-full') {
+      handleExpandAllFull();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [folderActionSignal?.nonce]);
+
   const handleToggleFolder = (node: FileTreeNode) => {
     const folderFile = node.file;
+    const currentlyExpanded = isFolderCurrentlyExpanded(node);
+
     // If deeper folder contents were not loaded yet (childrenLoaded === false), trigger H2_LIST_FOLDER_REQ
-    if (folderFile && folderFile.childrenLoaded === false) {
-      const currentlyExpanded = Boolean(expandedLazyFolders[node.path]);
-      if (!currentlyExpanded) {
-        setExpandedLazyFolders(prev => ({ ...prev, [node.path]: true }));
-        setCollapsedFolders(prev => ({ ...prev, [node.path]: false }));
-        if (!folderFile.isLoadingChildren) {
-          onExpandFolder(folderFile);
-        }
-        return;
+    if (!currentlyExpanded && folderFile && folderFile.childrenLoaded === false) {
+      setFolderOpenOverrides(prev => ({ ...prev, [node.path]: true }));
+      if (!folderFile.isLoadingChildren) {
+        onExpandFolder(folderFile);
       }
+      return;
     }
 
-    setCollapsedFolders(prev => ({
+    setFolderOpenOverrides(prev => ({
       ...prev,
-      [node.path]: !prev[node.path],
+      [node.path]: !currentlyExpanded,
     }));
   };
 
@@ -197,9 +304,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
     return nodes.map(node => {
       const isFolder = node.isDirectory;
       const isLazyUnloaded = Boolean(isFolder && node.file?.childrenLoaded === false);
-      const isCollapsed = isLazyUnloaded
-        ? !expandedLazyFolders[node.path] || Boolean(collapsedFolders[node.path])
-        : Boolean(collapsedFolders[node.path]);
+      const isCollapsed = isFolder
+        ? searchTerm.trim()
+          ? false
+          : !isFolderCurrentlyExpanded(node)
+        : false;
       const isLoadingChildren = Boolean(node.file?.isLoadingChildren);
       const isFileActive = !isFolder && node.file && node.file.id === activeFileId;
       const isDirty = !isFolder && node.file?.isDirty;
@@ -537,11 +646,32 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </label>
             )}
             <button
-              onClick={onExportWorkspace}
-              className="p-1 hover:bg-slate-200 dark:hover:bg-zinc-800 hover:text-slate-900 dark:hover:text-white rounded text-slate-500 dark:text-zinc-400 transition"
-              title="Export workspace JSON"
+              type="button"
+              onClick={handleExpandAllLazy}
+              className="p-1 hover:bg-slate-200 dark:hover:bg-zinc-800 hover:text-emerald-600 dark:hover:text-emerald-400 rounded text-slate-500 dark:text-zinc-400 transition"
+              title="Expand All - Lazy (loaded folders only)"
             >
-              <Download className="w-3.5 h-3.5" />
+              <ChevronsUpDown className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={handleExpandAllFull}
+              className={`p-1 hover:bg-slate-200 dark:hover:bg-zinc-800 rounded transition ${
+                isFullExpanding
+                  ? 'text-blue-600 dark:text-blue-400 animate-pulse bg-blue-50 dark:bg-blue-950/50'
+                  : 'text-slate-500 dark:text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400'
+              }`}
+              title="Expand All - Full (expands and loads nested cloud folders)"
+            >
+              <FolderTree className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={handleCollapseAll}
+              className="p-1 hover:bg-slate-200 dark:hover:bg-zinc-800 hover:text-slate-900 dark:hover:text-white rounded text-slate-500 dark:text-zinc-400 transition"
+              title="Collapse All Folders"
+            >
+              <ChevronsDownUp className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
@@ -634,15 +764,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       {/* Sidebar Footer */}
-      <div className="p-2 border-t border-slate-200 dark:border-zinc-800/80 bg-slate-50 dark:bg-zinc-900/30 flex items-center justify-between text-[11px] text-slate-500 dark:text-zinc-500">
+      <div className="px-2.5 py-1.5 border-t border-slate-200 dark:border-zinc-800/80 bg-slate-50 dark:bg-zinc-900/30 flex items-center justify-between text-[11px] text-slate-500 dark:text-zinc-500">
         <span className="font-mono">ide.freshfood.rocks</span>
-        <button
-          onClick={() => setCollapsedFolders({})}
-          className="hover:text-slate-800 dark:hover:text-zinc-300 text-[10px] underline"
-          title="Expand all loaded folders"
-        >
-          Expand All
-        </button>
       </div>
     </aside>
   );

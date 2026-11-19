@@ -30,8 +30,9 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
   if (!isOpen) return null;
 
   const shortcuts = [
+    { key: 'Cmd + Shift + P / F1', desc: 'Open Command Palette (IDE commands, type/clear > to toggle)' },
+    { key: 'Cmd + P / Ctrl + P', desc: 'Quick Open file switcher (type > for Command Palette)' },
     { key: 'Cmd + S / Ctrl + S', desc: 'Save active file to Cloud Storage (H2_SAVE_FILE_REQ)' },
-    { key: 'Cmd + P / Ctrl + P', desc: 'Quick Open file switcher' },
     { key: 'Cmd + Shift + F', desc: 'Global workspace search (loaded files)' },
     { key: 'Cmd + B / Ctrl + B', desc: 'Toggle Primary Side Bar' },
     { key: 'Cmd + , / Ctrl + ,', desc: 'Open Preferences tab' },

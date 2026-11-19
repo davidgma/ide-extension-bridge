@@ -28,6 +28,7 @@ import {
 type TopMenuKey = 'file' | 'edit' | 'view' | 'bridge' | 'help';
 
 interface MenuBarProps {
+  workspaceName: string;
   hasActiveFile: boolean;
   dirtyFilesCount: number;
   isSaving: boolean;
@@ -36,6 +37,7 @@ interface MenuBarProps {
   sidebarOpen: boolean;
   wordWrap: boolean;
   minimap: boolean;
+  onOpenCommandPalette: () => void;
   onOpenQuickOpen: () => void;
   onSaveCurrent: () => void;
   onSaveAll: () => void;
@@ -51,6 +53,7 @@ interface MenuBarProps {
 }
 
 export const MenuBar: React.FC<MenuBarProps> = ({
+  workspaceName,
   hasActiveFile,
   dirtyFilesCount,
   isSaving,
@@ -59,6 +62,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
   sidebarOpen,
   wordWrap,
   minimap,
+  onOpenCommandPalette,
   onOpenQuickOpen,
   onSaveCurrent,
   onSaveAll,
@@ -121,9 +125,9 @@ export const MenuBar: React.FC<MenuBarProps> = ({
     <nav
       ref={menuContainerRef}
       aria-label="Main menu"
-      className="h-8 bg-slate-100 dark:bg-[#141417] border-b border-slate-200 dark:border-zinc-800 px-2 flex items-center text-xs text-slate-700 dark:text-zinc-300 select-auto z-40 shrink-0"
+      className="h-9 bg-slate-100 dark:bg-[#141417] border-b border-slate-200 dark:border-zinc-800 px-2 grid grid-cols-[auto_1fr_auto] items-center gap-3 text-xs text-slate-700 dark:text-zinc-300 select-auto z-40 shrink-0"
     >
-      <div className="flex items-center gap-0.5">
+      <div className="flex items-center gap-0.5 shrink-0">
         {/* File Menu */}
         <div className="relative">
           <button
@@ -388,6 +392,35 @@ export const MenuBar: React.FC<MenuBarProps> = ({
           )}
         </div>
       </div>
+
+      {/* Centered VS Code-Style Command Palette Bar */}
+      <div className="flex items-center justify-center min-w-0 px-2">
+        <button
+          type="button"
+          onClick={() => {
+            setOpenMenu(null);
+            onOpenCommandPalette();
+          }}
+          title="Open Command Palette (Ctrl+Shift+P / F1)"
+          className="w-full max-w-md h-6 px-3 rounded-md bg-white dark:bg-[#1e1e23] hover:bg-slate-50 dark:hover:bg-[#25252b] border border-slate-300 dark:border-zinc-700/80 hover:border-blue-500/70 text-slate-600 dark:text-zinc-400 flex items-center justify-between gap-2 text-[11.5px] transition shadow-2xs"
+        >
+          <span className="flex items-center gap-2 truncate">
+            <Search className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+            <span className="truncate font-medium text-slate-700 dark:text-zinc-300">
+              {workspaceName}
+            </span>
+            <span className="hidden sm:inline text-slate-400 dark:text-zinc-500 truncate">
+              — Command Palette
+            </span>
+          </span>
+          <kbd className="hidden md:inline-block text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-100 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-slate-500 dark:text-zinc-400 shrink-0">
+            Ctrl+Shift+P
+          </kbd>
+        </button>
+      </div>
+
+      {/* Right spacer to keep Command Palette balanced */}
+      <div className="hidden lg:block w-36 shrink-0" aria-hidden="true" />
     </nav>
   );
 };

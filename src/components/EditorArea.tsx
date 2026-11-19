@@ -44,6 +44,7 @@ interface EditorAreaProps {
   onRetryLoadFile: (file: CloudFile) => void;
   onCursorChange: (pos: { line: number; col: number }, selectionLength: number) => void;
   onOpenQuickOpen: () => void;
+  onOpenCommandPalette?: () => void;
   onOpenSearch: () => void;
   onOpenFile: (fileId: string) => void;
   files: CloudFile[];
@@ -68,6 +69,7 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
   onRetryLoadFile,
   onCursorChange,
   onOpenQuickOpen,
+  onOpenCommandPalette,
   onOpenSearch,
   onOpenFile,
   files,
@@ -76,11 +78,18 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
   const editorRef = useRef<any>(null);
   const onCursorChangeRef = useRef(onCursorChange);
   const onSaveFileRef = useRef(onSaveFile);
+  const onOpenQuickOpenRef = useRef(onOpenQuickOpen);
+  const onOpenCommandPaletteRef = useRef(onOpenCommandPalette);
   const activeFileRef = useRef(activeFile);
 
   useEffect(() => {
     onCursorChangeRef.current = onCursorChange;
   }, [onCursorChange]);
+
+  useEffect(() => {
+    onOpenQuickOpenRef.current = onOpenQuickOpen;
+    onOpenCommandPaletteRef.current = onOpenCommandPalette;
+  }, [onOpenQuickOpen, onOpenCommandPalette]);
 
   useEffect(() => {
     onSaveFileRef.current = onSaveFile;
@@ -101,7 +110,18 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
     });
 
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyP, () => {
-      onOpenQuickOpen();
+      onOpenQuickOpenRef.current();
+    });
+
+    editor.addCommand(
+      monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyP,
+      () => {
+        onOpenCommandPaletteRef.current?.();
+      }
+    );
+
+    editor.addCommand(monaco.KeyCode.F1, () => {
+      onOpenCommandPaletteRef.current?.();
     });
 
     editor.onDidChangeCursorPosition(e => {

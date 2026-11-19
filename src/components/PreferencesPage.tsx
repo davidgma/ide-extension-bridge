@@ -405,6 +405,42 @@ export const PreferencesPage: React.FC<PreferencesPageProps> = ({
                   </button>
                 </div>
               </div>
+
+              {/* Default Sidebar Folder State */}
+              <div className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs font-semibold text-slate-900 dark:text-zinc-100">
+                    Default Sidebar Folder State
+                  </div>
+                  <div className="text-[11.5px] text-slate-500 dark:text-zinc-400 mt-0.5">
+                    Choose whether loaded folders in the sidebar start contracted or expanded by default.
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => onUpdateSettings({ sidebarDefaultFoldersExpanded: false })}
+                    className={`px-3 py-1 rounded-md border text-xs font-medium transition ${
+                      !settings.sidebarDefaultFoldersExpanded
+                        ? 'bg-blue-600 text-white border-blue-500'
+                        : 'bg-slate-50 dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 border-slate-300 dark:border-zinc-700 hover:border-blue-400'
+                    }`}
+                  >
+                    Contracted (Default)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onUpdateSettings({ sidebarDefaultFoldersExpanded: true })}
+                    className={`px-3 py-1 rounded-md border text-xs font-medium transition ${
+                      settings.sidebarDefaultFoldersExpanded
+                        ? 'bg-emerald-600 text-white border-emerald-500'
+                        : 'bg-slate-50 dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 border-slate-300 dark:border-zinc-700 hover:border-emerald-400'
+                    }`}
+                  >
+                    Expanded
+                  </button>
+                </div>
+              </div>
             </div>
           </section>
 

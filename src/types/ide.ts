@@ -208,6 +208,8 @@ export interface IdeSettings {
   sidebarWidth: number;
   /** Whether the primary sidebar is visible */
   sidebarOpen: boolean;
+  /** Whether loaded sidebar folders start expanded by default (false = contracted) */
+  sidebarDefaultFoldersExpanded: boolean;
   /** Preferred cloud provider for exporting preferences JSON (e.g. "pcloud") */
   preferencesExportProvider: string;
   /** Preferred cloud folder path for exporting preferences JSON (e.g. "2026/downloads") */
