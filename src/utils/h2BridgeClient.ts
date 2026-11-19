@@ -1,7 +1,8 @@
 /**
- * Clockie H2 + File Manager — External Web App Bridge Client (Protocol v1.3 / H2_CLOUD_BRIDGE).
+ * Clockie H2 + File Manager — External Web App Bridge Client (Protocol v1.4 / H2_CLOUD_BRIDGE).
  * Uses zero-URL session binding (per-tab window.sessionStorage), unified H2_CONNECT_REQ/RES,
- * launchedScope + driveRoot switching, lazy folder trees, concurrent reads, and clean disconnect.
+ * launchedScope + driveRoot switching, lazy folder trees, concurrent reads, dedicated folder ops,
+ * same-drive native moves, and clean disconnect.
  *
  * Official Documentation:
  * - Window.postMessage: https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage
@@ -18,7 +19,7 @@ import {
 } from '../types/ide';
 
 export const H2_PROTOCOL = 'H2_CLOUD_BRIDGE' as const;
-export const H2_PROTOCOL_VERSION = '1.3' as const;
+export const H2_PROTOCOL_VERSION = '1.4' as const;
 export const H2_SESSION_STORAGE_KEY = 'h2_bridge_session_id' as const;
 
 export interface H2BaseEnvelope {
@@ -161,11 +162,75 @@ export interface H2DeleteFileRes extends H2BaseEnvelope {
   source?: string;
   success: boolean;
   provider: CloudProvider;
-  itemType: 'file' | 'folder';
+  itemType?: 'file' | 'folder';
   fileId?: string;
   folderId?: string;
   relativePath: string;
   trashed?: boolean;
+  error: string | null;
+}
+
+export interface H2CreateFolderRes extends H2BaseEnvelope {
+  type: 'H2_CREATE_FOLDER_RES';
+  sessionId: string;
+  __h2FromExtension: true;
+  source?: string;
+  success: boolean;
+  created?: boolean;
+  provider: CloudProvider;
+  folderId?: string;
+  folderName?: string;
+  relativePath: string;
+  parentRelativePath?: string;
+  error: string | null;
+}
+
+export interface H2DeleteFolderRes extends H2BaseEnvelope {
+  type: 'H2_DELETE_FOLDER_RES';
+  sessionId: string;
+  __h2FromExtension: true;
+  source?: string;
+  success: boolean;
+  provider: CloudProvider;
+  itemType?: 'folder';
+  folderId?: string;
+  relativePath: string;
+  trashed?: boolean;
+  error: string | null;
+}
+
+export interface H2MoveFileRes extends H2BaseEnvelope {
+  type: 'H2_MOVE_FILE_RES';
+  sessionId: string;
+  __h2FromExtension: true;
+  source?: string;
+  success: boolean;
+  provider: CloudProvider;
+  fileId?: string;
+  parentFolderId?: string;
+  filename?: string;
+  relativePath?: string;
+  previousRelativePath?: string;
+  targetRelativePath?: string;
+  sizeBytes?: number;
+  modifiedMs?: number;
+  error: string | null;
+}
+
+export interface H2MoveFolderRes extends H2BaseEnvelope {
+  type: 'H2_MOVE_FOLDER_RES';
+  sessionId: string;
+  __h2FromExtension: true;
+  source?: string;
+  success: boolean;
+  provider: CloudProvider;
+  folderId?: string;
+  parentFolderId?: string;
+  folderName?: string;
+  relativePath?: string;
+  previousRelativePath?: string;
+  targetRelativePath?: string;
+  modifiedMs?: number;
   error: string | null;
 }
 
@@ -195,7 +260,7 @@ export interface H2BridgeLoggerHooks {
 }
 
 /**
- * Spec-compliant H2 Bridge Client for Protocol v1.3 (H2_CLOUD_BRIDGE).
+ * Spec-compliant H2 Bridge Client for Protocol v1.4 (H2_CLOUD_BRIDGE).
  * Strictly binds session state to per-tab window.sessionStorage (never URL or localStorage).
  */
 export class H2BridgeClient {
@@ -457,7 +522,80 @@ export class H2BridgeClient {
     return this.request<H2SaveFileRes>('H2_SAVE_FILE_REQ', payload);
   }
 
-  /** Type 7/8: Delete or trash files and folders */
+  /** Type 7/8: Delete or trash a file */
+  public deleteFile({
+    provider,
+    driveRoot = false,
+    relativePath,
+    fileId,
+    permanent = false,
+  }: {
+    provider?: CloudProvider;
+    driveRoot?: boolean;
+    relativePath: string;
+    fileId?: string;
+    permanent?: boolean;
+  }): Promise<H2DeleteFileRes> {
+    const payload: Record<string, any> = {
+      driveRoot,
+      relativePath,
+      permanent,
+    };
+    if (provider && provider !== 'all') payload.provider = provider;
+    if (fileId !== undefined && fileId !== '') payload.fileId = fileId;
+    return this.request<H2DeleteFileRes>('H2_DELETE_FILE_REQ', payload);
+  }
+
+  /** Type 9/10: Create nested folder(s) in the cloud */
+  public createFolder({
+    provider,
+    driveRoot = false,
+    relativePath,
+    parentRelativePath,
+    parentFolderId,
+    folderName,
+  }: {
+    provider?: CloudProvider;
+    driveRoot?: boolean;
+    relativePath?: string;
+    parentRelativePath?: string;
+    parentFolderId?: string;
+    folderName?: string;
+  }): Promise<H2CreateFolderRes> {
+    const payload: Record<string, any> = { driveRoot };
+    if (provider && provider !== 'all') payload.provider = provider;
+    if (relativePath !== undefined && relativePath !== '') payload.relativePath = relativePath;
+    if (parentRelativePath !== undefined) payload.parentRelativePath = parentRelativePath;
+    if (parentFolderId !== undefined && parentFolderId !== '') payload.parentFolderId = parentFolderId;
+    if (folderName !== undefined && folderName !== '') payload.folderName = folderName;
+    return this.request<H2CreateFolderRes>('H2_CREATE_FOLDER_REQ', payload);
+  }
+
+  /** Type 11/12: Recursively delete or trash a folder */
+  public deleteFolder({
+    provider,
+    driveRoot = false,
+    relativePath,
+    folderId,
+    permanent = false,
+  }: {
+    provider?: CloudProvider;
+    driveRoot?: boolean;
+    relativePath: string;
+    folderId?: string;
+    permanent?: boolean;
+  }): Promise<H2DeleteFolderRes> {
+    const payload: Record<string, any> = {
+      driveRoot,
+      relativePath,
+      permanent,
+    };
+    if (provider && provider !== 'all') payload.provider = provider;
+    if (folderId !== undefined && folderId !== '') payload.folderId = folderId;
+    return this.request<H2DeleteFolderRes>('H2_DELETE_FOLDER_REQ', payload);
+  }
+
+  /** Helper: Route deletion to H2_DELETE_FOLDER_REQ or H2_DELETE_FILE_REQ */
   public deleteItem({
     provider,
     driveRoot = false,
@@ -474,20 +612,86 @@ export class H2BridgeClient {
     fileId?: string;
     folderId?: string;
     permanent?: boolean;
-  }): Promise<H2DeleteFileRes> {
-    const payload: Record<string, any> = {
-      driveRoot,
-      itemType,
-      relativePath,
-      permanent,
-    };
-    if (provider && provider !== 'all') payload.provider = provider;
-    if (fileId !== undefined && fileId !== '') payload.fileId = fileId;
-    if (folderId !== undefined && folderId !== '') payload.folderId = folderId;
-    return this.request<H2DeleteFileRes>('H2_DELETE_FILE_REQ', payload);
+  }): Promise<H2DeleteFileRes | H2DeleteFolderRes> {
+    if (itemType === 'folder') {
+      return this.deleteFolder({ provider, driveRoot, relativePath, folderId, permanent });
+    }
+    return this.deleteFile({ provider, driveRoot, relativePath, fileId, permanent });
   }
 
-  /** Type 9a/9b: Gracefully terminate the active bridge session & clear sessionStorage */
+  /** Type 13/14: Same-drive native file move or rename */
+  public moveFile({
+    provider,
+    targetProvider,
+    driveRoot = false,
+    relativePath,
+    fileId,
+    targetRelativePath,
+    targetParentPath,
+    newName,
+    overwrite = false,
+  }: {
+    provider?: CloudProvider;
+    targetProvider?: CloudProvider;
+    driveRoot?: boolean;
+    relativePath: string;
+    fileId?: string;
+    targetRelativePath?: string;
+    targetParentPath?: string;
+    newName?: string;
+    overwrite?: boolean;
+  }): Promise<H2MoveFileRes> {
+    const payload: Record<string, any> = {
+      driveRoot,
+      relativePath,
+      overwrite,
+    };
+    if (provider && provider !== 'all') payload.provider = provider;
+    if (targetProvider && targetProvider !== 'all') payload.targetProvider = targetProvider;
+    if (fileId !== undefined && fileId !== '') payload.fileId = fileId;
+    if (targetRelativePath !== undefined) payload.targetRelativePath = targetRelativePath;
+    if (targetParentPath !== undefined) payload.targetParentPath = targetParentPath;
+    if (newName !== undefined && newName !== '') payload.newName = newName;
+    return this.request<H2MoveFileRes>('H2_MOVE_FILE_REQ', payload);
+  }
+
+  /** Type 15/16: Same-drive native folder move or rename */
+  public moveFolder({
+    provider,
+    targetProvider,
+    driveRoot = false,
+    relativePath,
+    folderId,
+    targetRelativePath,
+    targetParentPath,
+    newName,
+    overwrite = false,
+  }: {
+    provider?: CloudProvider;
+    targetProvider?: CloudProvider;
+    driveRoot?: boolean;
+    relativePath: string;
+    folderId?: string;
+    targetRelativePath?: string;
+    targetParentPath?: string;
+    newName?: string;
+    overwrite?: boolean;
+  }): Promise<H2MoveFolderRes> {
+    const payload: Record<string, any> = {
+      driveRoot,
+      relativePath,
+      overwrite,
+    };
+    if (provider && provider !== 'all') payload.provider = provider;
+    if (targetProvider && targetProvider !== 'all') payload.targetProvider = targetProvider;
+    if (folderId !== undefined && folderId !== '') payload.folderId = folderId;
+    if (targetRelativePath !== undefined) payload.targetRelativePath = targetRelativePath;
+    if (targetParentPath !== undefined) payload.targetParentPath = targetParentPath;
+    if (newName !== undefined && newName !== '') payload.newName = newName;
+    return this.request<H2MoveFolderRes>('H2_MOVE_FOLDER_REQ', payload);
+  }
+
+  /** Type 17a/17b: Gracefully terminate the active bridge session & clear sessionStorage */
   public async disconnect(): Promise<void> {
     try {
       window.sessionStorage.removeItem(this.storageKey);

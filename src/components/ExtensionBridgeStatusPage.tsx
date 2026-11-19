@@ -1,7 +1,7 @@
 /**
  * Full-Page Extension Bridge Status Editor Tab View (Step 2).
  * Replaces the old ExtensionBridgeModal overlay with a full-bleed editor tab
- * displaying Clockie H2 Bridge v1.3 connection status, Connect/Disconnect controls,
+ * displaying Clockie H2 Bridge v1.4 connection status, Connect/Disconnect controls,
  * per-tab sessionStorage details, drives, capabilities, live message stream, and protocol spec.
  *
  * Official Documentation:
@@ -68,6 +68,10 @@ export const ExtensionBridgeStatusPage: React.FC<ExtensionBridgeStatusPageProps>
     { key: 'createFolders', label: 'Create Folders' },
     { key: 'deleteFiles', label: 'Delete Files' },
     { key: 'deleteFolders', label: 'Delete Folders' },
+    { key: 'moveFiles', label: 'Move Files' },
+    { key: 'moveFolders', label: 'Move Folders' },
+    { key: 'nativeMove', label: 'Native Move' },
+    { key: 'crossDriveMove', label: 'Cross-Drive Move' },
     { key: 'trashByDefault', label: 'Trash by Default' },
   ];
 
@@ -80,7 +84,7 @@ export const ExtensionBridgeStatusPage: React.FC<ExtensionBridgeStatusPageProps>
     {
       type: 'Type 1a/1b: H2_CONNECT_REQ / H2_CONNECT_RES',
       direction: 'Unified Startup',
-      desc: 'Connects with previousSessionId from sessionStorage; returns sessionMode ("launched" | "direct"), launchedScope, accessMode, and drives.',
+      desc: 'Connects with previousSessionId from sessionStorage and supportedVersions: ["1.4"]; returns sessionMode, launchedScope, accessMode, and drives.',
     },
     {
       type: 'Type 2a: H2_WORKSPACE_TREE_REQ / H2_WORKSPACE_TREE',
@@ -105,10 +109,30 @@ export const ExtensionBridgeStatusPage: React.FC<ExtensionBridgeStatusPageProps>
     {
       type: 'Type 7/8: H2_DELETE_FILE_REQ / H2_DELETE_FILE_RES',
       direction: 'Readwrite Only',
-      desc: 'Deletes or trashes individual files or folders.',
+      desc: 'Deletes or trashes individual files.',
     },
     {
-      type: 'Type 9a/9b: H2_DISCONNECT_REQ / H2_DISCONNECT_RES',
+      type: 'Type 9/10: H2_CREATE_FOLDER_REQ / H2_CREATE_FOLDER_RES',
+      direction: 'Readwrite Only',
+      desc: 'Creates nested folders in the cloud and returns folderId, folderName, and relativePath.',
+    },
+    {
+      type: 'Type 11/12: H2_DELETE_FOLDER_REQ / H2_DELETE_FOLDER_RES',
+      direction: 'Readwrite Only',
+      desc: 'Recursively deletes or trashes a folder by relativePath or folderId.',
+    },
+    {
+      type: 'Type 13/14: H2_MOVE_FILE_REQ / H2_MOVE_FILE_RES',
+      direction: 'Same-Drive Native',
+      desc: 'Native same-drive file move or rename (cross-drive moves are disallowed).',
+    },
+    {
+      type: 'Type 15/16: H2_MOVE_FOLDER_REQ / H2_MOVE_FOLDER_RES',
+      direction: 'Same-Drive Native',
+      desc: 'Native same-drive folder pointer move or rename (rejects self/descendant targets).',
+    },
+    {
+      type: 'Type 17a/17b: H2_DISCONNECT_REQ / H2_DISCONNECT_RES',
       direction: 'Bidirectional',
       desc: 'Tears down active session cleanly and clears sessionStorage.',
     },
@@ -126,7 +150,7 @@ export const ExtensionBridgeStatusPage: React.FC<ExtensionBridgeStatusPageProps>
             <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
               <span>Extension Bridge Status</span>
               <span className="text-xs px-2 py-0.5 rounded-full font-mono bg-blue-50 dark:bg-blue-950/70 border border-blue-200 dark:border-blue-500/40 text-blue-700 dark:text-blue-300 font-normal">
-                H2_CLOUD_BRIDGE v1.3
+                H2_CLOUD_BRIDGE v1.4
               </span>
             </h2>
             <p className="text-xs text-slate-500 dark:text-zinc-400">
@@ -215,7 +239,7 @@ export const ExtensionBridgeStatusPage: React.FC<ExtensionBridgeStatusPageProps>
             type="button"
             onClick={onConnectBridge}
             className="px-2.5 py-1 text-xs rounded bg-emerald-600 hover:bg-emerald-500 text-white font-medium transition flex items-center gap-1"
-            title="Send H2_CONNECT_REQ (Protocol v1.3)"
+            title="Send H2_CONNECT_REQ (Protocol v1.4)"
           >
             <Plug className="w-3 h-3" />
             <span>Connect (H2_CONNECT_REQ)</span>
@@ -245,7 +269,7 @@ export const ExtensionBridgeStatusPage: React.FC<ExtensionBridgeStatusPageProps>
               : 'border-transparent text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200'
           }`}
         >
-          Protocol v1.3 Specification
+          Protocol v1.4 Specification
         </button>
       </div>
 
@@ -271,7 +295,7 @@ export const ExtensionBridgeStatusPage: React.FC<ExtensionBridgeStatusPageProps>
                     )}
                     {connectionReasonCode === 'UNSUPPORTED_VERSION' && (
                       <p className="text-slate-700 dark:text-zinc-300 text-[11px]">
-                        This web app requires H2_CLOUD_BRIDGE v1.3. Update your Clockie H2 extension to v1.3+.
+                        This web app requires H2_CLOUD_BRIDGE v1.4. Update your Clockie H2 extension to v1.4+.
                       </p>
                     )}
                   </div>
@@ -421,7 +445,7 @@ export const ExtensionBridgeStatusPage: React.FC<ExtensionBridgeStatusPageProps>
             <div className="space-y-4">
               <div className="p-4 rounded-xl border border-blue-300 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-950/20 text-xs text-slate-700 dark:text-zinc-300 space-y-1.5">
                 <div className="font-semibold text-slate-900 dark:text-white">
-                  Zero-URL Session & Envelope Rules (v1.3)
+                  Zero-URL Session & Envelope Rules (v1.4)
                 </div>
                 <p>
                   URLs stay 100% clean (no <code className="text-red-700 dark:text-red-300 font-mono">#h2Session</code> or{' '}

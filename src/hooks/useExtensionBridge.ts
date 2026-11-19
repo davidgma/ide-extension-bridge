@@ -35,8 +35,24 @@ import {
   H2WorkspaceTree,
   H2SaveFileRes,
   H2DeleteFileRes,
+  H2CreateFolderRes,
+  H2DeleteFolderRes,
+  H2MoveFileRes,
+  H2MoveFolderRes,
 } from '../utils/h2BridgeClient';
 import { inferMimeType } from '../utils/fileSystem';
+
+export interface H2MoveErrorInfo {
+  itemType: 'file' | 'folder';
+  provider: CloudProvider;
+  driveRoot: boolean;
+  itemId?: string;
+  oldRelativePath: string;
+  targetRelativePath: string;
+  overwrite: boolean;
+  error: string;
+  reasonCode: string | null;
+}
 
 interface UseExtensionBridgeProps {
   onWorkspaceTreeLoaded?: (
@@ -56,8 +72,25 @@ interface UseExtensionBridgeProps {
   onFileContentLoadError?: (relativePath: string, error: string) => void;
   onFileSaveConfirmed?: (localId: string, res: H2SaveFileRes) => void;
   onFileSaveError?: (localId: string, error: string) => void;
-  onItemDeleted?: (itemType: 'file' | 'folder', relativePath: string, res: H2DeleteFileRes) => void;
+  onItemDeleted?: (
+    itemType: 'file' | 'folder',
+    relativePath: string,
+    res: H2DeleteFileRes | H2DeleteFolderRes
+  ) => void;
   onItemDeleteError?: (relativePath: string, error: string) => void;
+  onFolderCreated?: (
+    res: H2CreateFolderRes,
+    fallback: { provider: CloudProvider; driveRoot: boolean; relativePath: string }
+  ) => void;
+  onFolderCreateError?: (relativePath: string, error: string) => void;
+  onItemMoved?: (
+    itemType: 'file' | 'folder',
+    provider: CloudProvider,
+    oldRelativePath: string,
+    newRelativePath: string,
+    res: H2MoveFileRes | H2MoveFolderRes
+  ) => void;
+  onItemMoveError?: (info: H2MoveErrorInfo) => void;
   directStartupDriveMode?: DirectStartupDriveMode;
   directStartupDrive?: string;
   onDrivesDiscovered?: (driveKeys: string[]) => void;
@@ -160,6 +193,10 @@ export function useExtensionBridge({
   onFileSaveError,
   onItemDeleted,
   onItemDeleteError,
+  onFolderCreated,
+  onFolderCreateError,
+  onItemMoved,
+  onItemMoveError,
   directStartupDriveMode = 'all',
   directStartupDrive = '',
   onDrivesDiscovered,
@@ -193,6 +230,10 @@ export function useExtensionBridge({
   const onFileSaveErrorRef = useRef(onFileSaveError);
   const onItemDeletedRef = useRef(onItemDeleted);
   const onItemDeleteErrorRef = useRef(onItemDeleteError);
+  const onFolderCreatedRef = useRef(onFolderCreated);
+  const onFolderCreateErrorRef = useRef(onFolderCreateError);
+  const onItemMovedRef = useRef(onItemMoved);
+  const onItemMoveErrorRef = useRef(onItemMoveError);
   const directStartupDriveModeRef = useRef<DirectStartupDriveMode>(directStartupDriveMode);
   const directStartupDriveRef = useRef<string>(directStartupDrive);
   const onDrivesDiscoveredRef = useRef(onDrivesDiscovered);
@@ -233,6 +274,22 @@ export function useExtensionBridge({
   useEffect(() => {
     onItemDeleteErrorRef.current = onItemDeleteError;
   }, [onItemDeleteError]);
+
+  useEffect(() => {
+    onFolderCreatedRef.current = onFolderCreated;
+  }, [onFolderCreated]);
+
+  useEffect(() => {
+    onFolderCreateErrorRef.current = onFolderCreateError;
+  }, [onFolderCreateError]);
+
+  useEffect(() => {
+    onItemMovedRef.current = onItemMoved;
+  }, [onItemMoved]);
+
+  useEffect(() => {
+    onItemMoveErrorRef.current = onItemMoveError;
+  }, [onItemMoveError]);
 
   useEffect(() => {
     directStartupDriveModeRef.current = directStartupDriveMode;
@@ -610,7 +667,7 @@ export function useExtensionBridge({
           setSessionId(res.sessionId);
           setHandshakeInfo({
             name: 'Clockie H2 Extension',
-            version: res.negotiatedVersion || '1.3',
+            version: res.negotiatedVersion || '1.4',
             sessionId: res.sessionId,
             sessionMode: res.sessionMode,
             accessMode: res.accessMode || 'readwrite',
@@ -963,7 +1020,7 @@ export function useExtensionBridge({
     [saveCloudFile]
   );
 
-  /** Type 7/8: Delete file or folder (guarded by accessMode) */
+  /** Type 7/8 & 11/12: Delete file (H2_DELETE_FILE_REQ) or folder (H2_DELETE_FOLDER_REQ) */
   const deleteCloudItem = useCallback(
     async ({
       provider,
@@ -996,6 +1053,17 @@ export function useExtensionBridge({
         return false;
       }
 
+      if (
+        (itemType === 'folder' && handshakeInfo?.capabilities?.deleteFolders === false) ||
+        (itemType === 'file' && handshakeInfo?.capabilities?.deleteFiles === false)
+      ) {
+        onItemDeleteErrorRef.current?.(
+          relativePath,
+          `${itemType === 'folder' ? 'Folder' : 'File'} deletion is disabled by extension policy`
+        );
+        return false;
+      }
+
       try {
         const res = await client.deleteItem({
           provider,
@@ -1011,6 +1079,193 @@ export function useExtensionBridge({
         return true;
       } catch (err: any) {
         onItemDeleteErrorRef.current?.(relativePath, err?.message || 'Delete failed');
+        return false;
+      }
+    },
+    [handshakeInfo]
+  );
+
+  /** Type 9/10: Create folder(s) via H2_CREATE_FOLDER_REQ */
+  const createCloudFolder = useCallback(
+    async ({
+      provider,
+      driveRoot,
+      relativePath,
+      parentRelativePath,
+      parentFolderId,
+      folderName,
+    }: {
+      provider: CloudProvider;
+      driveRoot?: boolean;
+      relativePath: string;
+      parentRelativePath?: string;
+      parentFolderId?: string;
+      folderName?: string;
+    }) => {
+      const effectiveDriveRoot = Boolean(driveRoot ?? handshakeInfo?.driveRootActive);
+      const client = clientRef.current;
+      if (!client) {
+        onFolderCreateErrorRef.current?.(relativePath, 'Extension bridge is not connected');
+        return false;
+      }
+
+      if (
+        handshakeInfo?.accessMode === 'readonly' ||
+        handshakeInfo?.capabilities?.createFolders === false
+      ) {
+        onFolderCreateErrorRef.current?.(
+          relativePath,
+          'Folder creation is disabled by extension policy'
+        );
+        return false;
+      }
+
+      try {
+        const res = await client.createFolder({
+          provider,
+          driveRoot: effectiveDriveRoot,
+          relativePath,
+          parentRelativePath,
+          parentFolderId,
+          folderName,
+        });
+        onFolderCreatedRef.current?.(res, {
+          provider: res.provider || provider,
+          driveRoot: effectiveDriveRoot,
+          relativePath: res.relativePath || relativePath,
+        });
+        return true;
+      } catch (err: any) {
+        onFolderCreateErrorRef.current?.(
+          relativePath,
+          err?.message || 'Failed to create cloud folder'
+        );
+        return false;
+      }
+    },
+    [handshakeInfo]
+  );
+
+  /** Type 13/14 & 15/16: Same-drive native move or rename via H2_MOVE_FILE_REQ / H2_MOVE_FOLDER_REQ */
+  const moveCloudItem = useCallback(
+    async ({
+      itemType,
+      provider,
+      targetProvider,
+      driveRoot,
+      relativePath,
+      fileId,
+      folderId,
+      targetRelativePath,
+      overwrite = false,
+    }: {
+      itemType: 'file' | 'folder';
+      provider: CloudProvider;
+      targetProvider?: CloudProvider;
+      driveRoot?: boolean;
+      relativePath: string;
+      fileId?: string;
+      folderId?: string;
+      targetRelativePath: string;
+      overwrite?: boolean;
+    }) => {
+      const effectiveDriveRoot = Boolean(driveRoot ?? handshakeInfo?.driveRootActive);
+      const itemId = itemType === 'folder' ? folderId : fileId;
+      const client = clientRef.current;
+
+      const emitMoveError = (error: string, reasonCode: string | null = null) => {
+        onItemMoveErrorRef.current?.({
+          itemType,
+          provider,
+          driveRoot: effectiveDriveRoot,
+          itemId,
+          oldRelativePath: relativePath,
+          targetRelativePath,
+          overwrite,
+          error,
+          reasonCode,
+        });
+      };
+
+      if (!client) {
+        emitMoveError('Extension bridge is not connected', 'NOT_CONNECTED');
+        return false;
+      }
+
+      if (handshakeInfo?.accessMode === 'readonly') {
+        emitMoveError('Workspace is in read-only mode (move disabled by extension policy)', 'READ_ONLY');
+        return false;
+      }
+
+      if (
+        (itemType === 'folder' && handshakeInfo?.capabilities?.moveFolders === false) ||
+        (itemType === 'file' && handshakeInfo?.capabilities?.moveFiles === false)
+      ) {
+        emitMoveError(
+          `Moving ${itemType === 'folder' ? 'folders' : 'files'} is disabled by extension policy`,
+          'CAPABILITY_DISABLED'
+        );
+        return false;
+      }
+
+      if (targetProvider && provider && targetProvider !== provider) {
+        emitMoveError(
+          `Cannot move across different drives (${provider} -> ${targetProvider}).`,
+          'CROSS_DRIVE_NOT_ALLOWED'
+        );
+        return false;
+      }
+
+      const cleanTarget = targetRelativePath.replace(/^\/+|\/+$/g, '');
+      const targetLastSlash = cleanTarget.lastIndexOf('/');
+      const targetParentPath = targetLastSlash >= 0 ? cleanTarget.slice(0, targetLastSlash) : '';
+      const newName = targetLastSlash >= 0 ? cleanTarget.slice(targetLastSlash + 1) : cleanTarget;
+
+      try {
+        const res =
+          itemType === 'folder'
+            ? await client.moveFolder({
+                provider,
+                targetProvider: targetProvider || provider,
+                driveRoot: effectiveDriveRoot,
+                relativePath,
+                folderId,
+                targetRelativePath: cleanTarget,
+                targetParentPath,
+                newName,
+                overwrite,
+              })
+            : await client.moveFile({
+                provider,
+                targetProvider: targetProvider || provider,
+                driveRoot: effectiveDriveRoot,
+                relativePath,
+                fileId,
+                targetRelativePath: cleanTarget,
+                targetParentPath,
+                newName,
+                overwrite,
+              });
+
+        const resolvedNewPath = (
+          res.relativePath ||
+          res.targetRelativePath ||
+          cleanTarget
+        ).replace(/^\/+|\/+$/g, '');
+
+        onItemMovedRef.current?.(
+          itemType,
+          res.provider || provider,
+          relativePath,
+          resolvedNewPath,
+          res
+        );
+        return true;
+      } catch (err: any) {
+        emitMoveError(
+          err?.message || 'Move failed',
+          err instanceof H2BridgeError ? err.reasonCode : null
+        );
         return false;
       }
     },
@@ -1151,6 +1406,8 @@ export function useExtensionBridge({
     saveCloudFile,
     saveAllCloudFiles,
     deleteCloudItem,
+    createCloudFolder,
+    moveCloudItem,
     listDriveEntries,
     readRawCloudFile,
     saveRawCloudFile,

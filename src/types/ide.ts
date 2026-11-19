@@ -42,6 +42,10 @@ export interface H2Capabilities {
   createFolders?: boolean;
   deleteFiles?: boolean;
   deleteFolders?: boolean;
+  moveFiles?: boolean;
+  moveFolders?: boolean;
+  nativeMove?: boolean;
+  crossDriveMove?: boolean;
   trashByDefault?: boolean;
 }
 
@@ -159,6 +163,14 @@ export type H2MessageType =
   | 'H2_SAVE_FILE_RES'
   | 'H2_DELETE_FILE_REQ'
   | 'H2_DELETE_FILE_RES'
+  | 'H2_CREATE_FOLDER_REQ'
+  | 'H2_CREATE_FOLDER_RES'
+  | 'H2_DELETE_FOLDER_REQ'
+  | 'H2_DELETE_FOLDER_RES'
+  | 'H2_MOVE_FILE_REQ'
+  | 'H2_MOVE_FILE_RES'
+  | 'H2_MOVE_FOLDER_REQ'
+  | 'H2_MOVE_FOLDER_RES'
   | 'H2_DISCONNECT_REQ'
   | 'H2_DISCONNECT_RES'
   | 'H2_SYSTEM_EVENT';

@@ -24,12 +24,23 @@ import {
   PREFERENCES_TAB_ID,
 } from './types/ide';
 import { INITIAL_CLOUD_FILES, inferMimeType } from './utils/fileSystem';
-import { H2SaveFileRes, H2DeleteFileRes } from './utils/h2BridgeClient';
-import { useExtensionBridge } from './hooks/useExtensionBridge';
+import {
+  H2SaveFileRes,
+  H2DeleteFileRes,
+  H2CreateFolderRes,
+  H2DeleteFolderRes,
+  H2MoveFileRes,
+  H2MoveFolderRes,
+} from './utils/h2BridgeClient';
+import { useExtensionBridge, H2MoveErrorInfo } from './hooks/useExtensionBridge';
 import { useDynamicFavicon } from './hooks/useDynamicFavicon';
 import { useIdeSettings } from './hooks/useIdeSettings';
 import { MenuBar } from './components/MenuBar';
-import { Sidebar, SidebarFolderActionSignal } from './components/Sidebar';
+import {
+  Sidebar,
+  SidebarFolderActionSignal,
+  SidebarMoveConflict,
+} from './components/Sidebar';
 import { TabsBar } from './components/TabsBar';
 import { EditorArea } from './components/EditorArea';
 import { ExtensionBridgeStatusPage } from './components/ExtensionBridgeStatusPage';
@@ -86,9 +97,15 @@ export default function App() {
   const [isExportPrefsOpen, setIsExportPrefsOpen] = useState(false);
   const [isImportPrefsOpen, setIsImportPrefsOpen] = useState(false);
   const [statusNotification, setStatusNotification] = useState<string | null>(null);
+  const [moveConflict, setMoveConflict] = useState<SidebarMoveConflict | null>(null);
 
   const readCloudFileRef = useRef<((file: CloudFile) => Promise<void>) | null>(null);
+  const filesRef = useRef<CloudFile[]>(files);
   const knownBridgeDrivesRef = useRef<string[]>(settings.knownBridgeDrives);
+
+  useEffect(() => {
+    filesRef.current = files;
+  }, [files]);
 
   useEffect(() => {
     knownBridgeDrivesRef.current = settings.knownBridgeDrives;
@@ -101,6 +118,152 @@ export default function App() {
       setStatusNotification(current => (current === msg ? null : current));
     }, 3500);
   }, []);
+
+  // Generate a non-colliding rename suggestion when a move/rename target already exists
+  const buildUniqueSuggestion = useCallback(
+    (targetPath: string, itemType: 'file' | 'folder', provider: CloudProvider) => {
+      const cleanTarget = targetPath.replace(/^\/+|\/+$/g, '');
+      const lastSlash = cleanTarget.lastIndexOf('/');
+      const parentDir = lastSlash >= 0 ? cleanTarget.slice(0, lastSlash) : '';
+      const baseName = lastSlash >= 0 ? cleanTarget.slice(lastSlash + 1) : cleanTarget;
+
+      let stem = baseName;
+      let ext = '';
+      if (itemType === 'file') {
+        const dotIdx = baseName.lastIndexOf('.');
+        if (dotIdx > 0) {
+          stem = baseName.slice(0, dotIdx);
+          ext = baseName.slice(dotIdx);
+        }
+      }
+
+      const existingPaths = new Set(
+        filesRef.current
+          .filter(f => !provider || f.cloudProvider === provider)
+          .map(f => f.path)
+      );
+
+      let suffix = '-copy';
+      let attempt = 1;
+      while (attempt < 50) {
+        const candidateName = `${stem}${suffix}${ext}`;
+        const candidatePath = parentDir ? `${parentDir}/${candidateName}` : candidateName;
+        if (!existingPaths.has(candidatePath)) {
+          return candidatePath;
+        }
+        attempt += 1;
+        suffix = `-copy-${attempt}`;
+      }
+      return parentDir ? `${parentDir}/${stem}-${Date.now()}${ext}` : `${stem}-${Date.now()}${ext}`;
+    },
+    []
+  );
+
+  // Synchronize local workspace tree & open tabs after a move/rename (including folder subtrees)
+  const applyLocalMove = useCallback(
+    ({
+      itemType,
+      provider,
+      oldPath,
+      newPath,
+      updatedId,
+      updatedParentId,
+    }: {
+      itemType: 'file' | 'folder';
+      provider: CloudProvider;
+      oldPath: string;
+      newPath: string;
+      updatedId?: string;
+      updatedParentId?: string;
+    }) => {
+      const cleanOld = oldPath.replace(/^\/+|\/+$/g, '');
+      const cleanNew = newPath.replace(/^\/+|\/+$/g, '');
+      if (!cleanOld || !cleanNew) return;
+
+      const newLastSlash = cleanNew.lastIndexOf('/');
+      const newName = newLastSlash >= 0 ? cleanNew.slice(newLastSlash + 1) : cleanNew;
+      const newParentPath = newLastSlash >= 0 ? cleanNew.slice(0, newLastSlash) : '';
+
+      const displacedIds = new Set<string>();
+
+      setFiles(prev => {
+        const next: CloudFile[] = [];
+        for (const item of prev) {
+          const sameProvider = !provider || !item.cloudProvider || item.cloudProvider === provider;
+          if (!sameProvider) {
+            next.push(item);
+            continue;
+          }
+
+          if (itemType === 'file') {
+            if (!item.isDirectory && item.path === cleanOld) {
+              next.push({
+                ...item,
+                path: cleanNew,
+                name: newName,
+                parentRelativePath: newParentPath,
+                cloudFileId: updatedId ?? item.cloudFileId,
+                parentId: updatedParentId ?? item.parentId,
+                lastModified: new Date().toLocaleTimeString(),
+              });
+            } else if (!item.isDirectory && item.path === cleanNew) {
+              // Overwritten target file removed
+              displacedIds.add(item.id);
+            } else {
+              next.push(item);
+            }
+          } else {
+            if (item.isDirectory && item.path === cleanOld) {
+              next.push({
+                ...item,
+                id: `dir-${item.cloudProvider}-${cleanNew}`,
+                path: cleanNew,
+                name: newName,
+                parentRelativePath: newParentPath,
+                folderId: updatedId ?? item.folderId,
+                parentId: updatedParentId ?? item.parentId,
+                lastModified: new Date().toLocaleTimeString(),
+              });
+            } else if (item.path.startsWith(`${cleanOld}/`)) {
+              const suffix = item.path.slice(cleanOld.length + 1);
+              const updatedPath = `${cleanNew}/${suffix}`;
+              const updatedParent = updatedPath.includes('/')
+                ? updatedPath.slice(0, updatedPath.lastIndexOf('/'))
+                : '';
+              next.push({
+                ...item,
+                path: updatedPath,
+                parentRelativePath: updatedParent,
+              });
+            } else if (item.path === cleanNew || item.path.startsWith(`${cleanNew}/`)) {
+              displacedIds.add(item.id);
+            } else {
+              next.push(item);
+            }
+          }
+        }
+        return next;
+      });
+
+      setOpenTabs(prevTabs => {
+        const filtered = prevTabs.filter(t => !displacedIds.has(t.fileId));
+        return filtered.map(t => {
+          if (itemType === 'file') {
+            if (t.path === cleanOld) {
+              return { ...t, path: cleanNew, title: newName };
+            }
+          } else if (t.path.startsWith(`${cleanOld}/`)) {
+            const suffix = t.path.slice(cleanOld.length + 1);
+            return { ...t, path: `${cleanNew}/${suffix}` };
+          }
+          return t;
+        });
+      });
+
+      setActiveTabId(curr => (curr && displacedIds.has(curr) ? null : curr));
+    },
+    []
+  );
 
   // Merge newly discovered drive keys from Clockie H2 into localStorage cache without redundant writes
   const handleDrivesDiscovered = useCallback(
@@ -117,7 +280,7 @@ export default function App() {
     [updateSettings]
   );
 
-  // Clockie H2 Bridge Protocol v1.3 (H2_CLOUD_BRIDGE) hook
+  // Clockie H2 Bridge Protocol v1.4 (H2_CLOUD_BRIDGE) hook
   const {
     sessionId,
     extensionStatus,
@@ -135,6 +298,8 @@ export default function App() {
     saveCloudFile,
     saveAllCloudFiles,
     deleteCloudItem,
+    createCloudFolder,
+    moveCloudItem,
     listDriveEntries,
     readRawCloudFile,
     saveRawCloudFile,
@@ -146,6 +311,7 @@ export default function App() {
     onDrivesDiscovered: handleDrivesDiscovered,
     onStartupSkippedNotice: notify,
     onWorkspaceTreeLoaded: (incomingItems, provider, rootName, primaryRelativePath) => {
+      setMoveConflict(null);
       const primaryFile = primaryRelativePath
         ? incomingItems.find(item => !item.isDirectory && item.path === primaryRelativePath)
         : undefined;
@@ -289,15 +455,18 @@ export default function App() {
       notify(`Save error: ${error}`);
     },
 
-    onItemDeleted: (itemType, relativePath, res: H2DeleteFileRes) => {
+    onItemDeleted: (itemType, relativePath, res: H2DeleteFileRes | H2DeleteFolderRes) => {
       const removedIds = new Set<string>();
+      const fileId = 'fileId' in res ? res.fileId : undefined;
       setFiles(prev => {
         const next: CloudFile[] = [];
         for (const item of prev) {
           const isMatch =
             itemType === 'folder'
-              ? item.path === relativePath || item.path.startsWith(`${relativePath}/`)
-              : item.path === relativePath || (Boolean(res.fileId) && item.cloudFileId === res.fileId);
+              ? item.path === relativePath ||
+                item.path.startsWith(`${relativePath}/`) ||
+                (Boolean(res.folderId) && item.folderId === res.folderId)
+              : item.path === relativePath || (Boolean(fileId) && item.cloudFileId === fileId);
           if (isMatch) {
             removedIds.add(item.id);
           } else {
@@ -328,6 +497,107 @@ export default function App() {
     onItemDeleteError: (relativePath, error) => {
       notify(`Delete failed (${relativePath}): ${error}`);
     },
+
+    onFolderCreated: (res: H2CreateFolderRes, fallback) => {
+      const resolvedPath = (res.relativePath || fallback.relativePath).replace(/^\/+|\/+$/g, '');
+      const resolvedProvider = res.provider || fallback.provider;
+      const parts = resolvedPath.split('/').filter(Boolean);
+      const leafName = res.folderName || parts[parts.length - 1] || resolvedPath;
+
+      setFiles(prev => {
+        const next = [...prev];
+        let accum = '';
+        for (let i = 0; i < parts.length; i++) {
+          const part = parts[i];
+          accum = accum ? `${accum}/${part}` : part;
+          const isLeaf = i === parts.length - 1;
+          const parentPath = accum.includes('/') ? accum.slice(0, accum.lastIndexOf('/')) : '';
+          const existingIdx = next.findIndex(
+            item => item.isDirectory && item.path === accum && item.cloudProvider === resolvedProvider
+          );
+
+          if (existingIdx >= 0) {
+            if (isLeaf) {
+              next[existingIdx] = {
+                ...next[existingIdx],
+                folderId: res.folderId ?? next[existingIdx].folderId,
+                name: leafName,
+                parentRelativePath: res.parentRelativePath ?? parentPath,
+                childrenLoaded: true,
+                driveRoot: fallback.driveRoot,
+                lastModified: new Date().toLocaleTimeString(),
+              };
+            }
+          } else {
+            next.push({
+              id: `dir-${resolvedProvider}-${accum}`,
+              folderId: isLeaf ? res.folderId : undefined,
+              name: isLeaf ? leafName : part,
+              path: accum,
+              parentRelativePath: isLeaf ? (res.parentRelativePath ?? parentPath) : parentPath,
+              content: '',
+              contentLoaded: true,
+              childrenLoaded: true,
+              driveRoot: fallback.driveRoot,
+              isDirectory: true,
+              cloudProvider: resolvedProvider,
+              lastModified: new Date().toLocaleTimeString(),
+            });
+          }
+        }
+        return next;
+      });
+
+      notify(`Created folder ${resolvedPath}`);
+    },
+
+    onFolderCreateError: (relativePath, error) => {
+      notify(`Create folder failed (${relativePath}): ${error}`);
+    },
+
+    onItemMoved: (itemType, provider, oldRelativePath, newRelativePath, res) => {
+      const updatedId =
+        itemType === 'folder'
+          ? (res as H2MoveFolderRes).folderId
+          : (res as H2MoveFileRes).fileId;
+      const updatedParentId = res.parentFolderId;
+      applyLocalMove({
+        itemType,
+        provider,
+        oldPath: oldRelativePath,
+        newPath: newRelativePath,
+        updatedId,
+        updatedParentId,
+      });
+      setMoveConflict(null);
+      notify(`Moved ${oldRelativePath} -> ${newRelativePath}`);
+    },
+
+    onItemMoveError: (info: H2MoveErrorInfo) => {
+      const looksLikeCollision =
+        !info.overwrite &&
+        (info.reasonCode === 'ALREADY_EXISTS' ||
+          info.reasonCode === 'CONFLICT' ||
+          /exist|already|conflict|overwrite|duplicate|eexist/i.test(info.error));
+
+      if (looksLikeCollision) {
+        setMoveConflict({
+          itemType: info.itemType,
+          provider: info.provider,
+          driveRoot: info.driveRoot,
+          itemId: info.itemId,
+          oldRelativePath: info.oldRelativePath,
+          targetRelativePath: info.targetRelativePath,
+          suggestedRelativePath: buildUniqueSuggestion(
+            info.targetRelativePath,
+            info.itemType,
+            info.provider
+          ),
+          errorMessage: info.error,
+        });
+      }
+      notify(`Move failed (${info.oldRelativePath}): ${info.error}`);
+    },
   });
 
   useEffect(() => {
@@ -337,13 +607,15 @@ export default function App() {
   // Keep the browser tab favicon black when disconnected/connecting and deep red when connected
   useDynamicFavicon(extensionStatus === 'connected');
 
-  // Derived v1.3 permission / capability flags
+  // Derived v1.4 permission / capability flags
   const isReadOnly = extensionStatus === 'connected' && handshakeInfo?.accessMode === 'readonly';
   const canSave = !isReadOnly && (extensionStatus !== 'connected' || handshakeInfo?.capabilities?.save !== false);
   const canCreateFiles = !isReadOnly && (extensionStatus !== 'connected' || handshakeInfo?.capabilities?.createFiles !== false);
   const canCreateFolders = !isReadOnly && (extensionStatus !== 'connected' || handshakeInfo?.capabilities?.createFolders !== false);
   const canDeleteFiles = !isReadOnly && (extensionStatus !== 'connected' || handshakeInfo?.capabilities?.deleteFiles !== false);
   const canDeleteFolders = !isReadOnly && (extensionStatus !== 'connected' || handshakeInfo?.capabilities?.deleteFolders !== false);
+  const canMoveFiles = !isReadOnly && (extensionStatus !== 'connected' || handshakeInfo?.capabilities?.moveFiles !== false);
+  const canMoveFolders = !isReadOnly && (extensionStatus !== 'connected' || handshakeInfo?.capabilities?.moveFolders !== false);
 
   const connectedDrives = useMemo<CloudProvider[]>(() => {
     const driveMap = handshakeInfo?.drives;
@@ -682,9 +954,9 @@ export default function App() {
     ]
   );
 
-  // Create directory entry
+  // Create directory entry via H2_CREATE_FOLDER_REQ when connected (or locally when disconnected)
   const handleCreateFolder = useCallback(
-    (rawFolderPath: string) => {
+    (rawFolderPath: string, parentFolderId?: string, parentProvider?: CloudProvider) => {
       if (isReadOnly || !canCreateFolders) {
         notify('Folder creation is disabled in read-only mode');
         return;
@@ -694,10 +966,34 @@ export default function App() {
       if (!cleanPath) return;
 
       const parts = cleanPath.split('/');
-      const name = parts[parts.length - 1];
+      const folderName = parts[parts.length - 1];
       const parentRelativePath = parts.slice(0, -1).join('/');
+      const parentMatch = parentRelativePath
+        ? files.find(f => f.isDirectory && f.path === parentRelativePath)
+        : undefined;
+      const resolvedParentFolderId = parentFolderId ?? parentMatch?.folderId;
       const targetProvider =
-        selectedDrive && selectedDrive !== 'all' ? selectedDrive : cloudProvider;
+        parentProvider && parentProvider !== 'all'
+          ? parentProvider
+          : parentMatch?.cloudProvider && parentMatch.cloudProvider !== 'all'
+            ? parentMatch.cloudProvider
+            : selectedDrive && selectedDrive !== 'all'
+              ? selectedDrive
+              : cloudProvider !== 'all'
+                ? cloudProvider
+                : connectedDrives[0] || 'pcloud';
+
+      if (extensionStatus === 'connected') {
+        createCloudFolder({
+          provider: targetProvider,
+          driveRoot: Boolean(handshakeInfo?.driveRootActive),
+          relativePath: cleanPath,
+          parentRelativePath,
+          parentFolderId: resolvedParentFolderId,
+          folderName,
+        });
+        return;
+      }
 
       setFiles(prev => {
         if (prev.some(item => item.isDirectory && item.path === cleanPath)) {
@@ -705,7 +1001,7 @@ export default function App() {
         }
         const newFolder: CloudFile = {
           id: `dir-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          name,
+          name: folderName,
           path: cleanPath,
           parentRelativePath,
           content: '',
@@ -720,7 +1016,18 @@ export default function App() {
       });
       notify(`Created folder ${cleanPath}`);
     },
-    [isReadOnly, canCreateFolders, selectedDrive, cloudProvider, handshakeInfo?.driveRootActive, notify]
+    [
+      isReadOnly,
+      canCreateFolders,
+      files,
+      selectedDrive,
+      cloudProvider,
+      connectedDrives,
+      extensionStatus,
+      handshakeInfo?.driveRootActive,
+      createCloudFolder,
+      notify,
+    ]
   );
 
   // Delete file
@@ -752,7 +1059,7 @@ export default function App() {
     [isReadOnly, canDeleteFiles, files, extensionStatus, handshakeInfo?.driveRootActive, deleteCloudItem, handleCloseTab, notify]
   );
 
-  // Delete folder & descendants
+  // Delete folder & descendants (uses H2_DELETE_FOLDER_REQ when connected)
   const handleDeleteFolder = useCallback(
     (folderPath: string, folderId?: string, folderProvider?: CloudProvider) => {
       if (isReadOnly || !canDeleteFolders) {
@@ -764,12 +1071,15 @@ export default function App() {
       if (!cleanPath) return;
 
       if (extensionStatus === 'connected') {
+        const matchedFolder = files.find(
+          f => f.isDirectory && f.path === cleanPath && (!folderProvider || f.cloudProvider === folderProvider)
+        );
         deleteCloudItem({
-          provider: folderProvider || cloudProvider,
-          driveRoot: Boolean(handshakeInfo?.driveRootActive),
+          provider: folderProvider || matchedFolder?.cloudProvider || cloudProvider,
+          driveRoot: Boolean(matchedFolder?.driveRoot ?? handshakeInfo?.driveRootActive),
           itemType: 'folder',
           relativePath: cleanPath,
-          folderId,
+          folderId: folderId ?? matchedFolder?.folderId,
           permanent: false,
         });
       } else {
@@ -799,25 +1109,325 @@ export default function App() {
     ]
   );
 
-  // Rename file locally
+  // Rename file via H2_MOVE_FILE_REQ (or local collision check/rename when disconnected)
   const handleRenameFile = useCallback(
     (fileId: string, newPath: string) => {
-      if (isReadOnly) {
-        notify('Rename is disabled in read-only mode');
+      if (isReadOnly || !canMoveFiles) {
+        notify('File rename/move is disabled in read-only mode');
         return;
       }
+      const target = files.find(f => f.id === fileId && !f.isDirectory);
+      if (!target) return;
       const cleanPath = newPath.replace(/^\/+|\/+$/g, '');
-      if (!cleanPath) return;
-      const newName = cleanPath.split('/').pop() || cleanPath;
-      setFiles(prev =>
-        prev.map(f => (f.id === fileId ? { ...f, path: cleanPath, name: newName, isDirty: true } : f))
-      );
-      setOpenTabs(prev =>
-        prev.map(t => (t.fileId === fileId ? { ...t, path: cleanPath, title: newName } : t))
-      );
-      notify(`Renamed to ${newName}`);
+      if (!cleanPath || cleanPath === target.path) return;
+
+      if (extensionStatus === 'connected') {
+        moveCloudItem({
+          itemType: 'file',
+          provider: target.cloudProvider,
+          targetProvider: target.cloudProvider,
+          driveRoot: Boolean(target.driveRoot ?? handshakeInfo?.driveRootActive),
+          relativePath: target.path,
+          fileId: target.cloudFileId,
+          targetRelativePath: cleanPath,
+          overwrite: false,
+        });
+      } else {
+        const collides = files.some(
+          f => f.id !== fileId && f.cloudProvider === target.cloudProvider && f.path === cleanPath
+        );
+        if (collides) {
+          setMoveConflict({
+            itemType: 'file',
+            provider: target.cloudProvider,
+            driveRoot: Boolean(target.driveRoot),
+            itemId: target.cloudFileId,
+            oldRelativePath: target.path,
+            targetRelativePath: cleanPath,
+            suggestedRelativePath: buildUniqueSuggestion(cleanPath, 'file', target.cloudProvider),
+            errorMessage: `"${cleanPath}" already exists in this workspace.`,
+          });
+          return;
+        }
+        applyLocalMove({
+          itemType: 'file',
+          provider: target.cloudProvider,
+          oldPath: target.path,
+          newPath: cleanPath,
+        });
+        notify(`Renamed to ${cleanPath.split('/').pop() || cleanPath}`);
+      }
     },
-    [isReadOnly, notify]
+    [
+      isReadOnly,
+      canMoveFiles,
+      files,
+      extensionStatus,
+      handshakeInfo?.driveRootActive,
+      moveCloudItem,
+      buildUniqueSuggestion,
+      applyLocalMove,
+      notify,
+    ]
+  );
+
+  // Rename or move folder via H2_MOVE_FOLDER_REQ
+  const handleRenameFolder = useCallback(
+    (folderPath: string, newFolderPath: string, folderId?: string, folderProvider?: CloudProvider) => {
+      if (isReadOnly || !canMoveFolders) {
+        notify('Folder rename/move is disabled in read-only mode');
+        return;
+      }
+      const cleanOld = folderPath.replace(/^\/+|\/+$/g, '');
+      const cleanNew = newFolderPath.replace(/^\/+|\/+$/g, '');
+      if (!cleanOld || !cleanNew || cleanOld === cleanNew) return;
+      if (cleanNew === cleanOld || cleanNew.startsWith(`${cleanOld}/`)) {
+        notify('Cannot move a folder inside itself');
+        return;
+      }
+
+      const matchedFolder = files.find(
+        f => f.isDirectory && f.path === cleanOld && (!folderProvider || f.cloudProvider === folderProvider)
+      );
+      const resolvedProvider =
+        folderProvider ||
+        matchedFolder?.cloudProvider ||
+        (selectedDrive && selectedDrive !== 'all' ? selectedDrive : cloudProvider);
+
+      if (extensionStatus === 'connected') {
+        moveCloudItem({
+          itemType: 'folder',
+          provider: resolvedProvider,
+          targetProvider: resolvedProvider,
+          driveRoot: Boolean(matchedFolder?.driveRoot ?? handshakeInfo?.driveRootActive),
+          relativePath: cleanOld,
+          folderId: folderId ?? matchedFolder?.folderId,
+          targetRelativePath: cleanNew,
+          overwrite: false,
+        });
+      } else {
+        const collides = files.some(
+          f => f.cloudProvider === resolvedProvider && f.path === cleanNew
+        );
+        if (collides) {
+          setMoveConflict({
+            itemType: 'folder',
+            provider: resolvedProvider,
+            driveRoot: Boolean(matchedFolder?.driveRoot),
+            itemId: folderId ?? matchedFolder?.folderId,
+            oldRelativePath: cleanOld,
+            targetRelativePath: cleanNew,
+            suggestedRelativePath: buildUniqueSuggestion(cleanNew, 'folder', resolvedProvider),
+            errorMessage: `"${cleanNew}" already exists in this workspace.`,
+          });
+          return;
+        }
+        applyLocalMove({
+          itemType: 'folder',
+          provider: resolvedProvider,
+          oldPath: cleanOld,
+          newPath: cleanNew,
+        });
+        notify(`Moved ${cleanOld} -> ${cleanNew}`);
+      }
+    },
+    [
+      isReadOnly,
+      canMoveFolders,
+      files,
+      selectedDrive,
+      cloudProvider,
+      extensionStatus,
+      handshakeInfo?.driveRootActive,
+      moveCloudItem,
+      buildUniqueSuggestion,
+      applyLocalMove,
+      notify,
+    ]
+  );
+
+  // Handle drag-and-drop moves in Sidebar (disallows cross-drive drops; uses same-drive native moves)
+  const handleMoveItem = useCallback(
+    ({
+      itemType,
+      sourcePath,
+      targetFolderPath,
+      itemId,
+      sourceProvider,
+      targetProvider,
+    }: {
+      itemType: 'file' | 'folder';
+      sourcePath: string;
+      targetFolderPath: string;
+      itemId?: string;
+      sourceProvider: CloudProvider;
+      targetProvider: CloudProvider;
+    }) => {
+      if (isReadOnly || (itemType === 'folder' ? !canMoveFolders : !canMoveFiles)) {
+        notify('Move operations are disabled in read-only mode');
+        return;
+      }
+      if (sourceProvider && targetProvider && sourceProvider !== targetProvider) {
+        notify(`Cross-drive move blocked: cannot move from ${sourceProvider} to ${targetProvider}.`);
+        return;
+      }
+
+      const cleanSource = sourcePath.replace(/^\/+|\/+$/g, '');
+      const cleanDestFolder = targetFolderPath.replace(/^\/+|\/+$/g, '');
+      const baseName = cleanSource.split('/').pop() || cleanSource;
+      const targetRelativePath = cleanDestFolder ? `${cleanDestFolder}/${baseName}` : baseName;
+      if (!cleanSource || targetRelativePath === cleanSource) return;
+
+      if (
+        itemType === 'folder' &&
+        (targetRelativePath === cleanSource || targetRelativePath.startsWith(`${cleanSource}/`))
+      ) {
+        notify('Cannot move a folder inside itself');
+        return;
+      }
+
+      const sourceItem = files.find(
+        f =>
+          Boolean(f.isDirectory) === (itemType === 'folder') &&
+          f.path === cleanSource &&
+          (!sourceProvider || f.cloudProvider === sourceProvider)
+      );
+      const effectiveProvider = sourceProvider || sourceItem?.cloudProvider || cloudProvider;
+
+      if (extensionStatus === 'connected') {
+        moveCloudItem({
+          itemType,
+          provider: effectiveProvider,
+          targetProvider: effectiveProvider,
+          driveRoot: Boolean(sourceItem?.driveRoot ?? handshakeInfo?.driveRootActive),
+          relativePath: cleanSource,
+          fileId: itemType === 'file' ? itemId ?? sourceItem?.cloudFileId : undefined,
+          folderId: itemType === 'folder' ? itemId ?? sourceItem?.folderId : undefined,
+          targetRelativePath,
+          overwrite: false,
+        });
+      } else {
+        const collides = files.some(
+          f => f.cloudProvider === effectiveProvider && f.path === targetRelativePath
+        );
+        if (collides) {
+          setMoveConflict({
+            itemType,
+            provider: effectiveProvider,
+            driveRoot: Boolean(sourceItem?.driveRoot),
+            itemId: itemId ?? (itemType === 'folder' ? sourceItem?.folderId : sourceItem?.cloudFileId),
+            oldRelativePath: cleanSource,
+            targetRelativePath,
+            suggestedRelativePath: buildUniqueSuggestion(
+              targetRelativePath,
+              itemType,
+              effectiveProvider
+            ),
+            errorMessage: `"${targetRelativePath}" already exists in this workspace.`,
+          });
+          return;
+        }
+        applyLocalMove({
+          itemType,
+          provider: effectiveProvider,
+          oldPath: cleanSource,
+          newPath: targetRelativePath,
+        });
+        notify(`Moved ${cleanSource} -> ${targetRelativePath}`);
+      }
+    },
+    [
+      isReadOnly,
+      canMoveFolders,
+      canMoveFiles,
+      files,
+      cloudProvider,
+      extensionStatus,
+      handshakeInfo?.driveRootActive,
+      moveCloudItem,
+      buildUniqueSuggestion,
+      applyLocalMove,
+      notify,
+    ]
+  );
+
+  // Conflict resolution: retry with overwrite: true
+  const handleResolveMoveConflictOverwrite = useCallback(() => {
+    if (!moveConflict) return;
+    const conflict = moveConflict;
+    setMoveConflict(null);
+
+    if (extensionStatus === 'connected') {
+      moveCloudItem({
+        itemType: conflict.itemType,
+        provider: conflict.provider,
+        targetProvider: conflict.provider,
+        driveRoot: conflict.driveRoot,
+        relativePath: conflict.oldRelativePath,
+        fileId: conflict.itemType === 'file' ? conflict.itemId : undefined,
+        folderId: conflict.itemType === 'folder' ? conflict.itemId : undefined,
+        targetRelativePath: conflict.targetRelativePath,
+        overwrite: true,
+      });
+    } else {
+      applyLocalMove({
+        itemType: conflict.itemType,
+        provider: conflict.provider,
+        oldPath: conflict.oldRelativePath,
+        newPath: conflict.targetRelativePath,
+      });
+      notify(`Overwrote ${conflict.targetRelativePath}`);
+    }
+  }, [moveConflict, extensionStatus, moveCloudItem, applyLocalMove, notify]);
+
+  // Conflict resolution: move using renamed suggestion
+  const handleResolveMoveConflictRename = useCallback(
+    (newRelativePath: string) => {
+      if (!moveConflict) return;
+      const conflict = moveConflict;
+      const cleanNew = newRelativePath.replace(/^\/+|\/+$/g, '');
+      if (!cleanNew || cleanNew === conflict.oldRelativePath) {
+        setMoveConflict(null);
+        return;
+      }
+
+      if (extensionStatus === 'connected') {
+        setMoveConflict(null);
+        moveCloudItem({
+          itemType: conflict.itemType,
+          provider: conflict.provider,
+          targetProvider: conflict.provider,
+          driveRoot: conflict.driveRoot,
+          relativePath: conflict.oldRelativePath,
+          fileId: conflict.itemType === 'file' ? conflict.itemId : undefined,
+          folderId: conflict.itemType === 'folder' ? conflict.itemId : undefined,
+          targetRelativePath: cleanNew,
+          overwrite: false,
+        });
+      } else {
+        const collides = files.some(
+          f => f.cloudProvider === conflict.provider && f.path === cleanNew
+        );
+        if (collides) {
+          setMoveConflict({
+            ...conflict,
+            targetRelativePath: cleanNew,
+            suggestedRelativePath: buildUniqueSuggestion(cleanNew, conflict.itemType, conflict.provider),
+            errorMessage: `"${cleanNew}" also already exists.`,
+          });
+          return;
+        }
+        setMoveConflict(null);
+        applyLocalMove({
+          itemType: conflict.itemType,
+          provider: conflict.provider,
+          oldPath: conflict.oldRelativePath,
+          newPath: cleanNew,
+        });
+        notify(`Moved ${conflict.oldRelativePath} -> ${cleanNew}`);
+      }
+    },
+    [moveConflict, extensionStatus, moveCloudItem, files, buildUniqueSuggestion, applyLocalMove, notify]
   );
 
   // Upload files from local disk
@@ -1302,8 +1912,11 @@ export default function App() {
                 canCreateFolders={canCreateFolders}
                 canDeleteFiles={canDeleteFiles}
                 canDeleteFolders={canDeleteFolders}
+                canMoveFiles={canMoveFiles}
+                canMoveFolders={canMoveFolders}
                 defaultFoldersExpanded={settings.sidebarDefaultFoldersExpanded}
                 folderActionSignal={folderActionSignal}
+                moveConflict={moveConflict}
                 drives={handshakeInfo?.drives}
                 selectedDrive={selectedDrive}
                 launchedScope={handshakeInfo?.launchedScope}
@@ -1318,6 +1931,16 @@ export default function App() {
                 onDeleteFile={handleDeleteFile}
                 onDeleteFolder={handleDeleteFolder}
                 onRenameFile={handleRenameFile}
+                onRenameFolder={handleRenameFolder}
+                onMoveItem={handleMoveItem}
+                onResolveMoveConflictOverwrite={handleResolveMoveConflictOverwrite}
+                onResolveMoveConflictRename={handleResolveMoveConflictRename}
+                onDismissMoveConflict={() => setMoveConflict(null)}
+                onCrossDriveDropBlocked={(sourceProvider, targetProvider) => {
+                  notify(
+                    `Cross-drive move blocked: cannot move items from ${sourceProvider} to ${targetProvider}.`
+                  );
+                }}
                 onUploadFiles={handleUploadFiles}
               />
             </div>

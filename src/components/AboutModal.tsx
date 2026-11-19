@@ -1,6 +1,6 @@
 /**
  * Compact Help -> About Modal for Monarch IDE.
- * Displays application version, Clockie H2 Bridge Protocol v1.3 status summary,
+ * Displays application version, Clockie H2 Bridge Protocol v1.4 status summary,
  * and active session metadata, dismissible with Esc or OK.
  *
  * Official Documentation:
@@ -61,7 +61,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({
                 Monarch IDE
               </h2>
               <div className="text-[11px] font-mono text-emerald-700 dark:text-emerald-400">
-                Version 1.3
+                Version 1.4
               </div>
             </div>
           </div>
@@ -85,7 +85,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({
               <span className="text-slate-500 dark:text-zinc-400">Bridge Protocol</span>
               <span className="text-emerald-700 dark:text-emerald-400 flex items-center gap-1">
                 <ShieldCheck className="w-3.5 h-3.5" />
-                H2_CLOUD_BRIDGE v1.3
+                H2_CLOUD_BRIDGE v1.4
               </span>
             </div>
             <div className="flex items-center justify-between px-3 py-2">

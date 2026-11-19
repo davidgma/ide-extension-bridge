@@ -76,10 +76,10 @@ export const ExtensionDebuggerPage: React.FC<ExtensionDebuggerPageProps> = ({
   };
 
   const handleCopyAllLogs = () => {
-    const debugReport = {
+      const debugReport = {
       timestamp: new Date().toISOString(),
       protocol: 'H2_CLOUD_BRIDGE',
-      protocolVersion: '1.3',
+      protocolVersion: '1.4',
       storageKey: H2_SESSION_STORAGE_KEY,
       sessionId,
       extensionStatus,
@@ -108,6 +108,10 @@ export const ExtensionDebuggerPage: React.FC<ExtensionDebuggerPageProps> = ({
         msg.type.includes('READ_FILE') ||
         msg.type.includes('SAVE_FILE') ||
         msg.type.includes('DELETE_FILE') ||
+        msg.type.includes('CREATE_FOLDER') ||
+        msg.type.includes('DELETE_FOLDER') ||
+        msg.type.includes('MOVE_FILE') ||
+        msg.type.includes('MOVE_FOLDER') ||
         msg.type.includes('TREE') ||
         msg.type.includes('LIST_FOLDER')
       );
@@ -133,7 +137,7 @@ export const ExtensionDebuggerPage: React.FC<ExtensionDebuggerPageProps> = ({
             <Bug className="w-4 h-4" />
           </div>
           <span className="font-bold text-slate-900 dark:text-white text-sm tracking-tight font-sans">
-            Extension Bridge Debugger (v1.3)
+            Extension Bridge Debugger (v1.4)
           </span>
 
           <div
@@ -246,7 +250,7 @@ export const ExtensionDebuggerPage: React.FC<ExtensionDebuggerPageProps> = ({
             type="button"
             onClick={onConnectBridge}
             className="flex items-center gap-1 px-2.5 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-sans font-medium transition"
-            title="Send H2_CONNECT_REQ (Protocol v1.3)"
+            title="Send H2_CONNECT_REQ (Protocol v1.4)"
           >
             <Plug className="w-3 h-3" />
             <span>Connect (H2_CONNECT_REQ)</span>
@@ -309,7 +313,7 @@ export const ExtensionDebuggerPage: React.FC<ExtensionDebuggerPageProps> = ({
             <div className="p-2 rounded bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800">
               <div className="text-slate-500 dark:text-zinc-500 text-[9.5px]">Protocol & Mode:</div>
               <div className="text-emerald-700 dark:text-emerald-300 font-semibold">
-                H2_CLOUD_BRIDGE v1.3 ({handshakeInfo?.sessionMode || 'unconnected'})
+                H2_CLOUD_BRIDGE v1.4 ({handshakeInfo?.sessionMode || 'unconnected'})
               </div>
             </div>
 
@@ -388,7 +392,7 @@ export const ExtensionDebuggerPage: React.FC<ExtensionDebuggerPageProps> = ({
           <div className="p-12 text-center text-slate-500 dark:text-zinc-500 text-xs italic space-y-2">
             <div>No H2_CLOUD_BRIDGE communication logged yet.</div>
             <div className="text-[11px] text-slate-400 dark:text-zinc-600 font-mono">
-              Click Connect (H2_CONNECT_REQ) to start a v1.3 session over window.postMessage.
+              Click Connect (H2_CONNECT_REQ) to start a v1.4 session over window.postMessage.
             </div>
           </div>
         ) : (
@@ -406,6 +410,10 @@ export const ExtensionDebuggerPage: React.FC<ExtensionDebuggerPageProps> = ({
               msg.type.includes('READ_FILE') ||
               msg.type.includes('SAVE_FILE') ||
               msg.type.includes('DELETE_FILE') ||
+              msg.type.includes('CREATE_FOLDER') ||
+              msg.type.includes('DELETE_FOLDER') ||
+              msg.type.includes('MOVE_FILE') ||
+              msg.type.includes('MOVE_FOLDER') ||
               msg.type.includes('TREE') ||
               msg.type.includes('LIST_FOLDER');
             const info = msg.dispatchInfo;

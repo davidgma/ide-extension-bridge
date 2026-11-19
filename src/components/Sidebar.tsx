@@ -1,12 +1,14 @@
 /**
- * Workspace File Explorer Sidebar (H2_CLOUD_BRIDGE v1.3).
+ * Workspace File Explorer Sidebar (H2_CLOUD_BRIDGE v1.4).
  * Displays folders (including empty & lazily-loaded subdirectories where childrenLoaded === false)
  * and files from H2_WORKSPACE_TREE / H2_LIST_FOLDER_RES.
- * Supports nested file creation (H2_SAVE_FILE_REQ), file/folder deletion (H2_DELETE_FILE_REQ),
- * multi-drive & driveRoot switching (H2_WORKSPACE_TREE_REQ), and read-only capability enforcement.
+ * Supports nested file & folder creation (H2_SAVE_FILE_REQ / H2_CREATE_FOLDER_REQ),
+ * dedicated deletion (H2_DELETE_FILE_REQ / H2_DELETE_FOLDER_REQ), same-drive drag & drop / inline
+ * rename (H2_MOVE_FILE_REQ / H2_MOVE_FOLDER_REQ), multi-drive switching, and read-only enforcement.
  *
  * Official Documentation:
  * - Lucide React Icons: https://lucide.dev/guide/packages/lucide-react
+ * - HTML Drag and Drop API: https://developer.mozilla.org/en-US/docs/Web/API/HTML_Drag_and_Drop_API
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
@@ -37,6 +39,7 @@ import {
   RotateCw,
   EyeOff,
   Lock,
+  AlertTriangle,
 } from 'lucide-react';
 import { CloudFile, FileTreeNode, CloudProvider, H2DriveStatus, H2LaunchedScope } from '../types/ide';
 import { getFileExtension, isImageFile, isVideoFile, buildFileTree } from '../utils/fileSystem';
@@ -44,6 +47,26 @@ import { getFileExtension, isImageFile, isVideoFile, buildFileTree } from '../ut
 export interface SidebarFolderActionSignal {
   action: 'collapse' | 'expand-lazy' | 'expand-full';
   nonce: number;
+}
+
+export interface SidebarMoveConflict {
+  itemType: 'file' | 'folder';
+  provider: CloudProvider;
+  driveRoot: boolean;
+  itemId?: string;
+  oldRelativePath: string;
+  targetRelativePath: string;
+  suggestedRelativePath: string;
+  errorMessage: string;
+}
+
+interface DraggingItem {
+  itemType: 'file' | 'folder';
+  id?: string;
+  path: string;
+  name: string;
+  parentPath: string;
+  provider: CloudProvider;
 }
 
 interface SidebarProps {
@@ -57,8 +80,11 @@ interface SidebarProps {
   canCreateFolders: boolean;
   canDeleteFiles: boolean;
   canDeleteFolders: boolean;
+  canMoveFiles: boolean;
+  canMoveFolders: boolean;
   defaultFoldersExpanded?: boolean;
   folderActionSignal?: SidebarFolderActionSignal | null;
+  moveConflict?: SidebarMoveConflict | null;
   drives?: Record<string, H2DriveStatus>;
   selectedDrive?: CloudProvider;
   launchedScope?: H2LaunchedScope | null;
@@ -69,10 +95,23 @@ interface SidebarProps {
   onExpandFolder: (folder: CloudFile) => void;
   onSelectFile: (fileId: string) => void;
   onCreateFile: (path: string, content?: string) => void;
-  onCreateFolder: (folderPath: string) => void;
+  onCreateFolder: (folderPath: string, parentFolderId?: string, parentProvider?: CloudProvider) => void;
   onDeleteFile: (fileId: string) => void;
   onDeleteFolder: (folderPath: string, folderId?: string, folderProvider?: CloudProvider) => void;
   onRenameFile: (fileId: string, newPath: string) => void;
+  onRenameFolder: (folderPath: string, newFolderPath: string, folderId?: string, folderProvider?: CloudProvider) => void;
+  onMoveItem: (params: {
+    itemType: 'file' | 'folder';
+    sourcePath: string;
+    targetFolderPath: string;
+    itemId?: string;
+    sourceProvider: CloudProvider;
+    targetProvider: CloudProvider;
+  }) => void;
+  onResolveMoveConflictOverwrite: () => void;
+  onResolveMoveConflictRename: (newRelativePath: string) => void;
+  onDismissMoveConflict: () => void;
+  onCrossDriveDropBlocked?: (sourceProvider: CloudProvider, targetProvider: CloudProvider) => void;
   onUploadFiles: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }
 
@@ -87,8 +126,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   canCreateFolders,
   canDeleteFiles,
   canDeleteFolders,
+  canMoveFiles,
+  canMoveFolders,
   defaultFoldersExpanded = false,
   folderActionSignal = null,
+  moveConflict = null,
   drives,
   selectedDrive,
   launchedScope,
@@ -103,6 +145,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onDeleteFile,
   onDeleteFolder,
   onRenameFile,
+  onRenameFolder,
+  onMoveItem,
+  onResolveMoveConflictOverwrite,
+  onResolveMoveConflictRename,
+  onDismissMoveConflict,
+  onCrossDriveDropBlocked,
   onUploadFiles,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -112,9 +160,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [showNewFileInput, setShowNewFileInput] = useState(false);
   const [showNewFolderInput, setShowNewFolderInput] = useState(false);
   const [newPathInput, setNewPathInput] = useState('');
+  const [newFolderContext, setNewFolderContext] = useState<{
+    parentFolderId?: string;
+    parentProvider?: CloudProvider;
+  } | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renamingFolder, setRenamingFolder] = useState<{
+    path: string;
+    folderId?: string;
+    provider?: CloudProvider;
+  } | null>(null);
   const [renameInput, setRenameInput] = useState('');
   const [confirmDeleteKey, setConfirmDeleteKey] = useState<string | null>(null);
+  const [draggingItem, setDraggingItem] = useState<DraggingItem | null>(null);
+  const [dropTargetPath, setDropTargetPath] = useState<string | null>(null);
+  const [dropInvalidReason, setDropInvalidReason] = useState<
+    'same-parent' | 'self-or-child' | 'cross-drive' | null
+  >(null);
+  const [conflictRenameInput, setConflictRenameInput] = useState('');
 
   const fileCount = React.useMemo(() => files.filter(f => !f.isDirectory).length, [files]);
 
@@ -143,6 +206,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setIsFullExpanding(false);
     fullExpandCountRef.current = 0;
   }, [defaultFoldersExpanded, cloudProvider, workspaceName]);
+
+  // Sync suggested path whenever a new move/rename collision occurs
+  useEffect(() => {
+    if (moveConflict) {
+      setConflictRenameInput(moveConflict.suggestedRelativePath);
+    } else {
+      setConflictRenameInput('');
+    }
+  }, [moveConflict]);
 
   const isFolderCurrentlyExpanded = useCallback(
     (node: FileTreeNode): boolean => {
@@ -276,6 +348,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     if (!cleaned) return;
     onCreateFile(cleaned, '');
     setNewPathInput('');
+    setNewFolderContext(null);
     setShowNewFileInput(false);
   };
 
@@ -283,20 +356,69 @@ export const Sidebar: React.FC<SidebarProps> = ({
     e.preventDefault();
     const cleaned = newPathInput.trim().replace(/^\/+|\/+$/g, '');
     if (!cleaned) return;
-    onCreateFolder(cleaned);
+    onCreateFolder(cleaned, newFolderContext?.parentFolderId, newFolderContext?.parentProvider);
     setNewPathInput('');
+    setNewFolderContext(null);
     setShowNewFolderInput(false);
   };
 
   const handleRenameSubmit = (fileId: string) => {
-    const cleaned = renameInput.trim().replace(/^\/+/, '');
-    if (!cleaned) {
-      setRenamingId(null);
-      return;
-    }
-    onRenameFile(fileId, cleaned);
+    const cleaned = renameInput.trim().replace(/^\/+|\/+$/g, '');
     setRenamingId(null);
     setRenameInput('');
+    if (!cleaned) return;
+    onRenameFile(fileId, cleaned);
+  };
+
+  const handleRenameFolderSubmit = (folderPath: string, folderId?: string, folderProvider?: CloudProvider) => {
+    const cleaned = renameInput.trim().replace(/^\/+|\/+$/g, '');
+    setRenamingFolder(null);
+    setRenameInput('');
+    if (!cleaned || cleaned === folderPath) return;
+    onRenameFolder(folderPath, cleaned, folderId, folderProvider);
+  };
+
+  const getParentPath = (itemPath: string) => {
+    const idx = itemPath.lastIndexOf('/');
+    return idx >= 0 ? itemPath.slice(0, idx) : '';
+  };
+
+  const getNodeProvider = (node: FileTreeNode): CloudProvider => {
+    if (node.file?.cloudProvider) return node.file.cloudProvider;
+    if (node.children) {
+      for (const child of node.children) {
+        const p = getNodeProvider(child);
+        if (p) return p;
+      }
+    }
+    return selectedDrive && selectedDrive !== 'all' ? selectedDrive : cloudProvider;
+  };
+
+  const evaluateDropTarget = (
+    dragItem: DraggingItem,
+    targetFolderPath: string,
+    targetProvider: CloudProvider
+  ): { valid: boolean; reason?: 'same-parent' | 'self-or-child' | 'cross-drive' } => {
+    if (targetProvider && dragItem.provider && targetProvider !== dragItem.provider) {
+      return { valid: false, reason: 'cross-drive' };
+    }
+    if (dragItem.parentPath === targetFolderPath) {
+      return { valid: false, reason: 'same-parent' };
+    }
+    if (
+      dragItem.itemType === 'folder' &&
+      targetFolderPath &&
+      (targetFolderPath === dragItem.path || targetFolderPath.startsWith(`${dragItem.path}/`))
+    ) {
+      return { valid: false, reason: 'self-or-child' };
+    }
+    return { valid: true };
+  };
+
+  const clearDragState = () => {
+    setDraggingItem(null);
+    setDropTargetPath(null);
+    setDropInvalidReason(null);
   };
 
   // Recursive Tree Rendering
@@ -317,109 +439,246 @@ export const Sidebar: React.FC<SidebarProps> = ({
       const isConfirmingDelete = confirmDeleteKey === deleteKey;
 
       if (isFolder) {
+        const folderProvider = getNodeProvider(node);
+        const isRenamingThisFolder = renamingFolder?.path === node.path && !isReadOnly;
+        const isDropTarget = dropTargetPath === node.path;
+
         return (
           <div key={`dir-${node.path}`} className="select-auto">
-            <div
-              onClick={() => handleToggleFolder(node)}
-              style={{ paddingLeft: `${depth * 14 + 10}px` }}
-              className="flex items-center justify-between py-1 pr-2 hover:bg-slate-200/70 dark:hover:bg-zinc-800/60 cursor-pointer text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 text-xs group"
-              title={
-                isLazyUnloaded
-                  ? `${node.path} — Click to load folder contents (H2_LIST_FOLDER_REQ)`
-                  : node.path
-              }
-            >
-              <div className="flex items-center gap-1.5 truncate">
-                {isLoadingChildren ? (
-                  <RotateCw className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 animate-spin shrink-0" />
-                ) : isCollapsed ? (
-                  <ChevronRight className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500 shrink-0" />
-                ) : (
-                  <ChevronDown className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500 shrink-0" />
-                )}
-                {isCollapsed ? (
-                  <Folder className="w-3.5 h-3.5 text-blue-600/80 dark:text-blue-400/80 shrink-0" />
-                ) : (
-                  <FolderOpen className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
-                )}
-                <span className="truncate font-medium text-slate-800 dark:text-zinc-300 text-[11.5px]">{node.name}</span>
-                {isLazyUnloaded && (
-                  <span className="text-[9px] font-mono text-blue-600 dark:text-blue-400/80 shrink-0">...</span>
-                )}
-              </div>
+            {isRenamingThisFolder ? (
+              <form
+                onSubmit={e => {
+                  e.preventDefault();
+                  handleRenameFolderSubmit(
+                    node.path,
+                    renamingFolder?.folderId ?? node.file?.folderId,
+                    renamingFolder?.provider ?? folderProvider
+                  );
+                }}
+                style={{ paddingLeft: `${depth * 14 + 10}px` }}
+                className="flex items-center gap-1 py-1 pr-2 bg-slate-200 dark:bg-zinc-800"
+              >
+                <Folder className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+                <input
+                  type="text"
+                  value={renameInput}
+                  onChange={e => setRenameInput(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Escape') {
+                      e.stopPropagation();
+                      setRenamingFolder(null);
+                      setRenameInput('');
+                    }
+                  }}
+                  autoFocus
+                  className="w-full bg-white dark:bg-zinc-900 border border-blue-500 text-slate-900 dark:text-white text-xs px-1.5 py-0.5 rounded outline-none font-mono"
+                  onBlur={() =>
+                    handleRenameFolderSubmit(
+                      node.path,
+                      renamingFolder?.folderId ?? node.file?.folderId,
+                      renamingFolder?.provider ?? folderProvider
+                    )
+                  }
+                />
+              </form>
+            ) : (
+              <div
+                draggable={!isReadOnly && canMoveFolders && !isConfirmingDelete}
+                onDragStart={e => {
+                  if (isReadOnly || !canMoveFolders) return;
+                  e.stopPropagation();
+                  setDraggingItem({
+                    itemType: 'folder',
+                    id: node.file?.folderId,
+                    path: node.path,
+                    name: node.name,
+                    parentPath: getParentPath(node.path),
+                    provider: folderProvider,
+                  });
+                  e.dataTransfer.effectAllowed = 'move';
+                  e.dataTransfer.setData('text/plain', node.path);
+                }}
+                onDragEnd={clearDragState}
+                onDragOver={e => {
+                  if (!draggingItem || isReadOnly) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const evalResult = evaluateDropTarget(draggingItem, node.path, folderProvider);
+                  setDropTargetPath(node.path);
+                  setDropInvalidReason(evalResult.reason || null);
+                  e.dataTransfer.dropEffect =
+                    evalResult.valid || evalResult.reason === 'cross-drive' ? 'move' : 'none';
+                }}
+                onDragLeave={e => {
+                  e.stopPropagation();
+                  if (dropTargetPath === node.path) {
+                    setDropTargetPath(null);
+                    setDropInvalidReason(null);
+                  }
+                }}
+                onDrop={e => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const currentDrag = draggingItem;
+                  clearDragState();
+                  if (!currentDrag || isReadOnly) return;
 
-              {!isReadOnly && (
-                <div className="flex items-center gap-1 shrink-0">
-                  {isConfirmingDelete ? (
-                    <div
-                      className="flex items-center gap-1"
-                      onClick={e => e.stopPropagation()}
-                    >
-                      <button
-                        onClick={() => {
-                          setConfirmDeleteKey(null);
-                          onDeleteFolder(node.path, node.file?.folderId, node.file?.cloudProvider);
-                        }}
-                        className="px-1.5 py-0.5 rounded bg-red-600 hover:bg-red-500 text-white text-[10px] font-semibold"
-                      >
-                        Delete
-                      </button>
-                      <button
-                        onClick={() => setConfirmDeleteKey(null)}
-                        className="px-1 py-0.5 rounded bg-slate-200 dark:bg-zinc-700 text-slate-800 dark:text-zinc-200 text-[10px]"
-                      >
-                        Cancel
-                      </button>
-                    </div>
+                  const evalResult = evaluateDropTarget(currentDrag, node.path, folderProvider);
+                  if (evalResult.reason === 'cross-drive') {
+                    onCrossDriveDropBlocked?.(currentDrag.provider, folderProvider);
+                    return;
+                  }
+                  if (!evalResult.valid) return;
+
+                  onMoveItem({
+                    itemType: currentDrag.itemType,
+                    sourcePath: currentDrag.path,
+                    targetFolderPath: node.path,
+                    itemId: currentDrag.id,
+                    sourceProvider: currentDrag.provider,
+                    targetProvider: folderProvider,
+                  });
+                }}
+                onClick={() => handleToggleFolder(node)}
+                style={{ paddingLeft: `${depth * 14 + 10}px` }}
+                className={`flex items-center justify-between py-1 pr-2 cursor-pointer text-xs group transition-colors ${
+                  isDropTarget
+                    ? dropInvalidReason
+                      ? 'bg-red-50 dark:bg-red-950/40 ring-1 ring-inset ring-red-500/70 text-red-700 dark:text-red-300'
+                      : 'bg-emerald-50 dark:bg-emerald-950/50 ring-1 ring-inset ring-emerald-500 text-emerald-900 dark:text-emerald-200'
+                    : 'hover:bg-slate-200/70 dark:hover:bg-zinc-800/60 text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200'
+                }`}
+                title={
+                  isLazyUnloaded
+                    ? `${node.path} — Click to load folder contents (H2_LIST_FOLDER_REQ)`
+                    : node.path
+                }
+              >
+                <div className="flex items-center gap-1.5 truncate">
+                  {isLoadingChildren ? (
+                    <RotateCw className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 animate-spin shrink-0" />
+                  ) : isCollapsed ? (
+                    <ChevronRight className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500 shrink-0" />
                   ) : (
-                    <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity">
-                      {canCreateFiles && (
-                        <button
-                          type="button"
-                          onClick={e => {
-                            e.stopPropagation();
-                            setShowNewFileInput(true);
-                            setShowNewFolderInput(false);
-                            setNewPathInput(`${node.path}/`);
-                          }}
-                          className="p-1 hover:text-emerald-600 dark:hover:text-emerald-400 rounded hover:bg-slate-200 dark:hover:bg-zinc-700/60"
-                          title={`New file inside ${node.path}`}
-                        >
-                          <Plus className="w-3 h-3" />
-                        </button>
-                      )}
-                      {canCreateFolders && (
-                        <button
-                          type="button"
-                          onClick={e => {
-                            e.stopPropagation();
-                            setShowNewFolderInput(true);
-                            setShowNewFileInput(false);
-                            setNewPathInput(`${node.path}/`);
-                          }}
-                          className="p-1 hover:text-blue-600 dark:hover:text-blue-400 rounded hover:bg-slate-200 dark:hover:bg-zinc-700/60"
-                          title={`New subfolder inside ${node.path}`}
-                        >
-                          <FolderPlus className="w-3 h-3" />
-                        </button>
-                      )}
-                      {canDeleteFolders && (
-                        <button
-                          onClick={e => {
-                            e.stopPropagation();
-                            setConfirmDeleteKey(deleteKey);
-                          }}
-                          className="p-1 hover:text-red-600 dark:hover:text-red-400 rounded hover:bg-slate-200 dark:hover:bg-zinc-700/60"
-                          title="Delete folder"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                      )}
-                    </div>
+                    <ChevronDown className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500 shrink-0" />
+                  )}
+                  {isCollapsed ? (
+                    <Folder className="w-3.5 h-3.5 text-blue-600/80 dark:text-blue-400/80 shrink-0" />
+                  ) : (
+                    <FolderOpen className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+                  )}
+                  <span className="truncate font-medium text-slate-800 dark:text-zinc-300 text-[11.5px]">
+                    {node.name}
+                  </span>
+                  {isLazyUnloaded && (
+                    <span className="text-[9px] font-mono text-blue-600 dark:text-blue-400/80 shrink-0">
+                      ...
+                    </span>
+                  )}
+                  {isDropTarget && dropInvalidReason === 'cross-drive' && (
+                    <span className="text-[9.5px] font-mono text-red-600 dark:text-red-400 shrink-0">
+                      (cross-drive blocked)
+                    </span>
                   )}
                 </div>
-              )}
-            </div>
+
+                {!isReadOnly && (
+                  <div className="flex items-center gap-1 shrink-0">
+                    {isConfirmingDelete ? (
+                      <div
+                        className="flex items-center gap-1"
+                        onClick={e => e.stopPropagation()}
+                      >
+                        <button
+                          onClick={() => {
+                            setConfirmDeleteKey(null);
+                            onDeleteFolder(node.path, node.file?.folderId, folderProvider);
+                          }}
+                          className="px-1.5 py-0.5 rounded bg-red-600 hover:bg-red-500 text-white text-[10px] font-semibold"
+                        >
+                          Delete
+                        </button>
+                        <button
+                          onClick={() => setConfirmDeleteKey(null)}
+                          className="px-1 py-0.5 rounded bg-slate-200 dark:bg-zinc-700 text-slate-800 dark:text-zinc-200 text-[10px]"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity">
+                        {canCreateFiles && (
+                          <button
+                            type="button"
+                            onClick={e => {
+                              e.stopPropagation();
+                              setShowNewFileInput(true);
+                              setShowNewFolderInput(false);
+                              setNewFolderContext(null);
+                              setNewPathInput(`${node.path}/`);
+                            }}
+                            className="p-1 hover:text-emerald-600 dark:hover:text-emerald-400 rounded hover:bg-slate-200 dark:hover:bg-zinc-700/60"
+                            title={`New file inside ${node.path}`}
+                          >
+                            <Plus className="w-3 h-3" />
+                          </button>
+                        )}
+                        {canCreateFolders && (
+                          <button
+                            type="button"
+                            onClick={e => {
+                              e.stopPropagation();
+                              setShowNewFolderInput(true);
+                              setShowNewFileInput(false);
+                              setNewFolderContext({
+                                parentFolderId: node.file?.folderId,
+                                parentProvider: folderProvider,
+                              });
+                              setNewPathInput(`${node.path}/`);
+                            }}
+                            className="p-1 hover:text-blue-600 dark:hover:text-blue-400 rounded hover:bg-slate-200 dark:hover:bg-zinc-700/60"
+                            title={`New subfolder inside ${node.path}`}
+                          >
+                            <FolderPlus className="w-3 h-3" />
+                          </button>
+                        )}
+                        {canMoveFolders && (
+                          <button
+                            type="button"
+                            onClick={e => {
+                              e.stopPropagation();
+                              setRenamingFolder({
+                                path: node.path,
+                                folderId: node.file?.folderId,
+                                provider: folderProvider,
+                              });
+                              setRenamingId(null);
+                              setRenameInput(node.path);
+                            }}
+                            className="p-1 hover:text-slate-950 dark:hover:text-white rounded hover:bg-slate-200 dark:hover:bg-zinc-700/60"
+                            title="Rename or move folder"
+                          >
+                            <Edit2 className="w-3 h-3" />
+                          </button>
+                        )}
+                        {canDeleteFolders && (
+                          <button
+                            onClick={e => {
+                              e.stopPropagation();
+                              setConfirmDeleteKey(deleteKey);
+                            }}
+                            className="p-1 hover:text-red-600 dark:hover:text-red-400 rounded hover:bg-slate-200 dark:hover:bg-zinc-700/60"
+                            title="Delete folder"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             {!isCollapsed && node.children && node.children.length > 0 && (
               <div>{renderTree(node.children, depth + 1)}</div>
@@ -446,8 +705,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
               type="text"
               value={renameInput}
               onChange={e => setRenameInput(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Escape') {
+                  e.stopPropagation();
+                  setRenamingId(null);
+                  setRenameInput('');
+                }
+              }}
               autoFocus
-              className="w-full bg-white dark:bg-zinc-900 border border-emerald-500 text-slate-900 dark:text-white text-xs px-1.5 py-0.5 rounded outline-none"
+              className="w-full bg-white dark:bg-zinc-900 border border-emerald-500 text-slate-900 dark:text-white text-xs px-1.5 py-0.5 rounded outline-none font-mono"
               onBlur={() => handleRenameSubmit(file.id)}
             />
           </form>
@@ -457,6 +723,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
       return (
         <div
           key={`${file.cloudProvider}:${node.path}`}
+          draggable={!isReadOnly && canMoveFiles && !isConfirmingDelete}
+          onDragStart={e => {
+            if (isReadOnly || !canMoveFiles) return;
+            e.stopPropagation();
+            setDraggingItem({
+              itemType: 'file',
+              id: file.cloudFileId,
+              path: file.path,
+              name: file.name,
+              parentPath: getParentPath(file.path),
+              provider: file.cloudProvider,
+            });
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', file.path);
+          }}
+          onDragEnd={clearDragState}
           onClick={() => onSelectFile(file.id)}
           style={{ paddingLeft: `${depth * 14 + 16}px` }}
           className={`flex items-center justify-between py-1 pr-2 cursor-pointer text-xs group transition-colors ${
@@ -644,6 +926,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 onClick={() => {
                   setShowNewFolderInput(true);
                   setShowNewFileInput(false);
+                  setNewFolderContext(null);
                   setNewPathInput('');
                 }}
                 className="p-1 hover:bg-slate-200 dark:hover:bg-zinc-800 hover:text-slate-900 dark:hover:text-white rounded text-slate-500 dark:text-zinc-400 transition"
@@ -759,7 +1042,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => setShowNewFolderInput(false)}
+              onClick={() => {
+                setNewFolderContext(null);
+                setShowNewFolderInput(false);
+              }}
               className="px-2 py-1 bg-slate-200 dark:bg-zinc-800 text-slate-700 dark:text-zinc-400 text-xs rounded"
             >
               Cancel
@@ -768,8 +1054,136 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </form>
       )}
 
-      {/* File Tree List */}
-      <div className="flex-1 overflow-y-auto py-1">
+      {/* Inline Move / Rename Collision Resolution Prompt */}
+      {moveConflict && (
+        <form
+          onSubmit={e => {
+            e.preventDefault();
+            const cleaned = conflictRenameInput.trim().replace(/^\/+|\/+$/g, '');
+            if (cleaned) {
+              onResolveMoveConflictRename(cleaned);
+            }
+          }}
+          className="p-2.5 border-b border-red-200 dark:border-red-500/40 bg-red-50/90 dark:bg-red-950/35 space-y-2 text-xs"
+        >
+          <div className="flex items-start gap-1.5 text-red-800 dark:text-red-200">
+            <AlertTriangle className="w-3.5 h-3.5 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+            <div className="min-w-0">
+              <div className="font-semibold text-[11px]">Destination already exists</div>
+              <div className="text-[10.5px] text-red-700 dark:text-red-300/90 break-all">
+                {moveConflict.errorMessage}
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-[10px] font-mono text-slate-600 dark:text-zinc-400 mb-1">
+              Rename destination or overwrite existing:
+            </label>
+            <input
+              type="text"
+              value={conflictRenameInput}
+              onChange={e => setConflictRenameInput(e.target.value)}
+              className="w-full bg-white dark:bg-zinc-950 border border-blue-400 dark:border-blue-500/60 rounded px-2 py-1 text-[11px] font-mono text-slate-900 dark:text-white outline-none"
+              autoFocus
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="submit"
+              className="px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[10.5px] font-semibold transition"
+            >
+              Move as Renamed
+            </button>
+            <button
+              type="button"
+              onClick={onResolveMoveConflictOverwrite}
+              className="px-2 py-1 rounded bg-red-600 hover:bg-red-500 text-white text-[10.5px] font-semibold transition"
+            >
+              Overwrite
+            </button>
+            <button
+              type="button"
+              onClick={onDismissMoveConflict}
+              className="px-2 py-1 rounded bg-white dark:bg-zinc-800 border border-slate-300 dark:border-zinc-700 text-slate-700 dark:text-zinc-300 text-[10.5px] transition"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* Root Drop Indicator when dragging a nested item */}
+      {draggingItem && draggingItem.parentPath !== '' && !isReadOnly && (
+        <div
+          onDragOver={e => {
+            e.preventDefault();
+            setDropTargetPath('__root__');
+            setDropInvalidReason(null);
+            e.dataTransfer.dropEffect = 'move';
+          }}
+          onDragLeave={() => {
+            if (dropTargetPath === '__root__') {
+              setDropTargetPath(null);
+            }
+          }}
+          onDrop={e => {
+            e.preventDefault();
+            const currentDrag = draggingItem;
+            clearDragState();
+            if (!currentDrag) return;
+            onMoveItem({
+              itemType: currentDrag.itemType,
+              sourcePath: currentDrag.path,
+              targetFolderPath: '',
+              itemId: currentDrag.id,
+              sourceProvider: currentDrag.provider,
+              targetProvider: currentDrag.provider,
+            });
+          }}
+          className={`mx-2 mt-1.5 px-2.5 py-1.5 rounded border border-dashed text-[10.5px] font-mono text-center transition ${
+            dropTargetPath === '__root__'
+              ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-200 font-semibold'
+              : 'border-slate-300 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-900/50 text-slate-500 dark:text-zinc-400'
+          }`}
+        >
+          Drop here to move &quot;{draggingItem.name}&quot; to {draggingItem.provider} root
+        </div>
+      )}
+
+      {/* File Tree List (also acts as drive root drop zone on empty space) */}
+      <div
+        className={`flex-1 overflow-y-auto py-1 transition-colors ${
+          dropTargetPath === '__root__' ? 'bg-blue-50/40 dark:bg-blue-950/15' : ''
+        }`}
+        onDragOver={e => {
+          if (!draggingItem || draggingItem.parentPath === '' || isReadOnly) return;
+          e.preventDefault();
+          setDropTargetPath('__root__');
+          setDropInvalidReason(null);
+          e.dataTransfer.dropEffect = 'move';
+        }}
+        onDragLeave={e => {
+          if (e.currentTarget === e.target && dropTargetPath === '__root__') {
+            setDropTargetPath(null);
+          }
+        }}
+        onDrop={e => {
+          if (!draggingItem || draggingItem.parentPath === '' || isReadOnly) return;
+          e.preventDefault();
+          const currentDrag = draggingItem;
+          clearDragState();
+          onMoveItem({
+            itemType: currentDrag.itemType,
+            sourcePath: currentDrag.path,
+            targetFolderPath: '',
+            itemId: currentDrag.id,
+            sourceProvider: currentDrag.provider,
+            targetProvider: currentDrag.provider,
+          });
+        }}
+      >
         {fileTree.length === 0 ? (
           <div className="p-4 text-center text-slate-500 dark:text-zinc-500 text-xs italic">
             {searchTerm ? 'No files match search filter.' : 'Workspace is empty.'}
