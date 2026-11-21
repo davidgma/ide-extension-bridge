@@ -28,6 +28,7 @@ import {
   X,
   HardDrive,
   Cloud,
+  FolderOpen,
 } from 'lucide-react';
 import {
   DirectStartupDriveMode,
@@ -487,7 +488,7 @@ export const PreferencesPage: React.FC<PreferencesPageProps> = ({
                 </h2>
               </div>
               <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-500/30">
-                Direct Startup Only
+                Startup &amp; Shortcut
               </span>
             </div>
 
@@ -641,6 +642,72 @@ export const PreferencesPage: React.FC<PreferencesPageProps> = ({
                   )}
                 </div>
               )}
+
+              {/* Clockie H2 "Monarch IDE" Shortcut Launch Default Folder */}
+              <div className="border-t border-slate-200 dark:border-zinc-800/80 pt-4 space-y-2.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <div className="text-xs font-semibold text-slate-900 dark:text-zinc-100 flex items-center gap-1.5">
+                      <FolderOpen className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                      <span>&quot;Monarch IDE&quot; Shortcut Default pCloud Folder</span>
+                    </div>
+                    <div className="text-[11.5px] text-slate-500 dark:text-zinc-400 mt-0.5 leading-relaxed">
+                      When opened via the Clockie H2 <span className="font-mono">pcloud/Monarch IDE</span>{' '}
+                      shortcut, the IDE starts a blank file immediately and navigates the Explorer to this
+                      pCloud folder (falls back to drive root if not found or left blank).
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center flex-1 min-w-[220px] rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 overflow-hidden focus-within:ring-2 focus-within:ring-blue-500/50">
+                    <span className="px-2.5 py-1.5 bg-slate-100 dark:bg-zinc-900 border-r border-slate-200 dark:border-zinc-800 text-[11px] font-mono text-slate-500 dark:text-zinc-400 shrink-0">
+                      pcloud:/
+                    </span>
+                    <input
+                      type="text"
+                      value={settings.monarchShortcutFolder}
+                      onChange={e =>
+                        onUpdateSettings({
+                          monarchShortcutFolder: e.target.value.replace(/^\/+/, ''),
+                        })
+                      }
+                      onBlur={() =>
+                        onUpdateSettings({
+                          monarchShortcutFolder: settings.monarchShortcutFolder
+                            .trim()
+                            .replace(/^\/+|\/+$/g, ''),
+                        })
+                      }
+                      placeholder="tmp (leave empty for drive root)"
+                      aria-label="Monarch IDE shortcut default pCloud folder"
+                      className="flex-1 px-2.5 py-1.5 bg-transparent text-xs font-mono text-slate-900 dark:text-white outline-none"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onUpdateSettings({ monarchShortcutFolder: 'tmp' })}
+                    className={`px-2.5 py-1.5 rounded-lg border text-xs font-mono transition ${
+                      settings.monarchShortcutFolder === 'tmp'
+                        ? 'bg-emerald-600 text-white border-emerald-500 font-semibold'
+                        : 'bg-slate-50 dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 border-slate-300 dark:border-zinc-700 hover:border-emerald-400'
+                    }`}
+                  >
+                    Default (tmp)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onUpdateSettings({ monarchShortcutFolder: '' })}
+                    className={`px-2.5 py-1.5 rounded-lg border text-xs font-mono transition ${
+                      settings.monarchShortcutFolder === ''
+                        ? 'bg-blue-600 text-white border-blue-500 font-semibold'
+                        : 'bg-slate-50 dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 border-slate-300 dark:border-zinc-700 hover:border-blue-400'
+                    }`}
+                  >
+                    Root (/)
+                  </button>
+                </div>
+              </div>
             </div>
           </section>
 

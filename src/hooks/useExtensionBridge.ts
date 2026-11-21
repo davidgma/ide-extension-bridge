@@ -1,13 +1,14 @@
 /**
- * React hook managing the Clockie H2 Bridge Protocol v1.3 (H2_CLOUD_BRIDGE) lifecycle:
+ * React hook managing the Clockie H2 Bridge Protocol v1.4 (H2_CLOUD_BRIDGE) lifecycle:
  * 1. Zero-URL Session Binding: never reads or writes #h2Session or ?h2Session in window.location;
  *    stores active sessionId strictly in per-tab window.sessionStorage ("h2_bridge_session_id").
  * 2. Unified Startup (H2_CONNECT_REQ / H2_CONNECT_RES): sends previousSessionId from sessionStorage
  *    and handles both sessionMode: "launched" (with launchedScope) and sessionMode: "direct".
- * 3. H2_BRIDGE_READY detection on document_start / DOMContentLoaded.
+ * 3. Custom "Monarch IDE" Shortcut Launch: when launched on pcloud file "Monarch IDE", immediately opens
+ *    a new untitled file and fetches pcloud driveRoot asynchronously in the background.
  * 4. Multi-drive & driveRoot switching (switchDriveRoot / requestWorkspaceTree / listFolder).
  * 5. Lazy / concurrent file reads (readCloudFile / readMultipleCloudFiles via Promise.all).
- * 6. Access mode (readwrite / readonly) and capability guards for saves and deletes.
+ * 6. Access mode (readwrite / readonly) and capability guards for saves, folders, moves, and deletes.
  * 7. Clean teardown on pagehide and explicit disconnect (H2_DISCONNECT_REQ).
  *
  * Official Documentation:
@@ -66,6 +67,7 @@ interface UseExtensionBridgeProps {
     primaryRelativePath: string,
     launchedItemType: 'folder' | 'file' | 'workspace'
   ) => void;
+  onMonarchShortcutLaunched?: (info: { provider: CloudProvider }) => void;
   onFolderChildrenLoaded?: (
     basePath: string,
     provider: CloudProvider,
@@ -192,6 +194,7 @@ function mapTreePayloadToCloudFiles(
 
 export function useExtensionBridge({
   onWorkspaceTreeLoaded,
+  onMonarchShortcutLaunched,
   onFolderChildrenLoaded,
   onFolderChildrenLoadError,
   onFileContentLoaded,
@@ -230,6 +233,7 @@ export function useExtensionBridge({
 
   // Stable refs for parent callbacks
   const onWorkspaceTreeLoadedRef = useRef(onWorkspaceTreeLoaded);
+  const onMonarchShortcutLaunchedRef = useRef(onMonarchShortcutLaunched);
   const onFolderChildrenLoadedRef = useRef(onFolderChildrenLoaded);
   const onFolderChildrenLoadErrorRef = useRef(onFolderChildrenLoadError);
   const onFileContentLoadedRef = useRef(onFileContentLoaded);
@@ -250,6 +254,10 @@ export function useExtensionBridge({
   useEffect(() => {
     onWorkspaceTreeLoadedRef.current = onWorkspaceTreeLoaded;
   }, [onWorkspaceTreeLoaded]);
+
+  useEffect(() => {
+    onMonarchShortcutLaunchedRef.current = onMonarchShortcutLaunched;
+  }, [onMonarchShortcutLaunched]);
 
   useEffect(() => {
     onFolderChildrenLoadedRef.current = onFolderChildrenLoaded;
@@ -651,25 +659,36 @@ export function useExtensionBridge({
           const effectiveRootName = scope?.rootName || res.rootName || 'Cloud Workspace';
           const effectiveItemType = scope?.launchedItemType || res.launchedItemType || 'folder';
           const effectivePrimaryPath = scope?.primaryRelativePath ?? res.primaryRelativePath ?? '';
+          const normalizedPrimaryPath = effectivePrimaryPath.replace(/^\/+|\/+$/g, '');
+
+          // Custom shortcut launch: pcloud file "Monarch IDE" starts a fresh untitled editor
+          // immediately while asynchronously loading the pcloud root tree in the background.
+          const isMonarchShortcut =
+            effectiveProvider === 'pcloud' &&
+            effectiveItemType === 'file' &&
+            normalizedPrimaryPath === 'Monarch IDE';
 
           const canLoadSingleDrive =
             Boolean(chosenDrive) &&
             chosenDrive !== 'all' &&
             (res.drives ? Boolean(res.drives[chosenDrive]?.connected) : true);
 
-          const initialProvider =
-            isDirectMode && startupMode === 'single' && canLoadSingleDrive
+          const initialProvider = isMonarchShortcut
+            ? 'pcloud'
+            : isDirectMode && startupMode === 'single' && canLoadSingleDrive
               ? chosenDrive
               : effectiveProvider;
-          const initialRootName =
-            isDirectMode && startupMode === 'none'
+          const initialRootName = isMonarchShortcut
+            ? 'pcloud Root'
+            : isDirectMode && startupMode === 'none'
               ? 'Select a Cloud Drive'
               : isDirectMode && startupMode === 'single'
                 ? canLoadSingleDrive
                   ? `${chosenDrive} Root`
                   : 'Select a Cloud Drive'
                 : effectiveRootName;
-          const initialDriveRootActive = isDirectMode && startupMode === 'single' && canLoadSingleDrive;
+          const initialDriveRootActive =
+            isMonarchShortcut || (isDirectMode && startupMode === 'single' && canLoadSingleDrive);
 
           setExtensionStatus('connected');
           setSessionId(res.sessionId);
@@ -681,10 +700,10 @@ export function useExtensionBridge({
             accessMode: res.accessMode || 'readwrite',
             provider: initialProvider,
             rootName: initialRootName,
-            rootFolderId: scope?.rootFolderId,
-            launchedItemType: effectiveItemType,
-            primaryRelativePath: effectivePrimaryPath,
-            launchedScope: scope,
+            rootFolderId: isMonarchShortcut ? undefined : scope?.rootFolderId,
+            launchedItemType: isMonarchShortcut ? 'workspace' : effectiveItemType,
+            primaryRelativePath: isMonarchShortcut ? '' : effectivePrimaryPath,
+            launchedScope: isMonarchShortcut ? null : scope,
             driveRootActive: initialDriveRootActive,
             drives: res.drives,
             capabilities: res.capabilities,
@@ -692,7 +711,31 @@ export function useExtensionBridge({
             latencyMs,
           });
 
-          if (!isDirectMode || startupMode === 'all') {
+          if (isMonarchShortcut) {
+            logMessageRef.current(
+              'event',
+              'H2_SYSTEM_EVENT',
+              {
+                message:
+                  'Monarch IDE shortcut detected on pcloud: opening new untitled file & loading pcloud root asynchronously.',
+                provider: effectiveProvider,
+                launchedItemType: effectiveItemType,
+                primaryRelativePath: normalizedPrimaryPath,
+              },
+              'sent',
+              undefined,
+              res.sessionId
+            );
+            onMonarchShortcutLaunchedRef.current?.({ provider: 'pcloud' });
+            void requestWorkspaceTree({
+              provider: 'pcloud',
+              driveRoot: true,
+              maxDepth: 2,
+              primaryRelativePathOverride: '',
+              launchedItemTypeOverride: 'workspace',
+              fallbackRootName: 'pcloud Root',
+            });
+          } else if (!isDirectMode || startupMode === 'all') {
             // Launched mode always honors Clockie H2 scope; direct 'all' mode loads all connected drives
             await requestWorkspaceTree({
               provider: effectiveProvider,

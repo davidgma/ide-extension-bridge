@@ -31,7 +31,7 @@ import {
   Laptop,
   Code2,
 } from 'lucide-react';
-import { CloudFile, CloudProvider } from '../types/ide';
+import { CloudFile, CloudProvider, SelectedExplorerFolder } from '../types/ide';
 import { getMonacoLanguage } from '../utils/fileSystem';
 import { DriveEntriesResult } from './CloudFolderPickerModal';
 import { H2CreateFolderRes, H2FolderMetadata } from '../utils/h2BridgeClient';
@@ -55,6 +55,7 @@ interface SaveAsModalProps {
   isOpen: boolean;
   targetFile: CloudFile | null;
   files: CloudFile[];
+  selectedFolder?: SelectedExplorerFolder | null;
   isBridgeConnected: boolean;
   isReadOnly: boolean;
   canSave: boolean;
@@ -84,6 +85,7 @@ export const SaveAsModal: React.FC<SaveAsModalProps> = ({
   isOpen,
   targetFile,
   files,
+  selectedFolder = null,
   isBridgeConnected,
   isReadOnly,
   canSave,
@@ -255,22 +257,51 @@ export const SaveAsModal: React.FC<SaveAsModalProps> = ({
     [isBridgeConnected, files, listDriveEntries, buildBreadcrumbsFromPath]
   );
 
-  // Initialize modal values whenever opened
+  const initializedTargetKeyRef = React.useRef<string | null>(null);
+
+  // Initialize modal values whenever opened (or target file changes), without clobbering edits on background refreshes
   useEffect(() => {
-    if (!isOpen || !targetFile) return;
+    if (!isOpen || !targetFile) {
+      initializedTargetKeyRef.current = null;
+      return;
+    }
 
-    const initialProvider =
-      !targetFile.isUntitled &&
-      targetFile.cloudProvider &&
-      driveOptions.includes(targetFile.cloudProvider)
-        ? targetFile.cloudProvider
-        : driveOptions.includes(defaultDrive)
-          ? defaultDrive
-          : driveOptions[0];
+    const openKey = `${targetFile.id}:${targetFile.path}`;
+    if (initializedTargetKeyRef.current === openKey) {
+      return;
+    }
+    initializedTargetKeyRef.current = openKey;
 
-    const initialFolder = targetFile.isUntitled
-      ? ''
-      : (targetFile.parentRelativePath || '').replace(/^\/+|\/+$/g, '');
+    let initialProvider: CloudProvider;
+    let initialFolder = '';
+    let initialFolderId: string | undefined = undefined;
+
+    if (targetFile.isUntitled) {
+      // Untitled files default to the currently selected folder in the Explorer side panel
+      initialProvider =
+        selectedFolder?.provider && driveOptions.includes(selectedFolder.provider)
+          ? selectedFolder.provider
+          : driveOptions.includes(defaultDrive)
+            ? defaultDrive
+            : driveOptions[0];
+
+      const matchesSelectedProvider =
+        selectedFolder && (!selectedFolder.provider || selectedFolder.provider === initialProvider);
+      initialFolder = matchesSelectedProvider
+        ? selectedFolder.path.replace(/^\/+|\/+$/g, '')
+        : '';
+      initialFolderId = matchesSelectedProvider ? selectedFolder.folderId : undefined;
+    } else {
+      // Saved files default to their own current drive and parent folder
+      initialProvider =
+        targetFile.cloudProvider && driveOptions.includes(targetFile.cloudProvider)
+          ? targetFile.cloudProvider
+          : driveOptions.includes(defaultDrive)
+            ? defaultDrive
+            : driveOptions[0];
+      initialFolder = (targetFile.parentRelativePath || '').replace(/^\/+|\/+$/g, '');
+      initialFolderId = targetFile.parentId;
+    }
 
     setProvider(initialProvider);
     setFilename(targetFile.name || 'Untitled-1');
@@ -281,8 +312,8 @@ export const SaveAsModal: React.FC<SaveAsModalProps> = ({
     setOverwritePending(null);
     setIsSaving(false);
 
-    loadFolder(initialProvider, initialFolder, targetFile.parentId, true);
-  }, [isOpen, targetFile, driveOptions, defaultDrive, loadFolder]);
+    loadFolder(initialProvider, initialFolder, initialFolderId, true);
+  }, [isOpen, targetFile, selectedFolder, driveOptions, defaultDrive, loadFolder]);
 
   // Capture Escape so it closes only this dialog cleanly
   useEffect(() => {

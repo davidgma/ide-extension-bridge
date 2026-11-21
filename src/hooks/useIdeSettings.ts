@@ -67,6 +67,7 @@ export function createDefaultIdeSettings(date = new Date()): IdeSettings {
     directStartupDriveMode: 'all',
     directStartupDrive: '',
     knownBridgeDrives: [],
+    monarchShortcutFolder: 'tmp',
   };
 }
 
@@ -183,6 +184,10 @@ export function normalizeIdeSettings(raw: unknown): IdeSettings {
           )
         )
       : [],
+    monarchShortcutFolder:
+      typeof input.monarchShortcutFolder === 'string'
+        ? input.monarchShortcutFolder.trim().replace(/^\/+|\/+$/g, '')
+        : defaults.monarchShortcutFolder,
   };
 }
 

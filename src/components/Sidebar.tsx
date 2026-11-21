@@ -43,7 +43,14 @@ import {
   Lock,
   AlertTriangle,
 } from 'lucide-react';
-import { CloudFile, FileTreeNode, CloudProvider, H2DriveStatus, H2LaunchedScope } from '../types/ide';
+import {
+  CloudFile,
+  FileTreeNode,
+  CloudProvider,
+  H2DriveStatus,
+  H2LaunchedScope,
+  SelectedExplorerFolder,
+} from '../types/ide';
 import {
   getFileExtension,
   isImageFile,
@@ -56,6 +63,13 @@ import {
 
 export interface SidebarFolderActionSignal {
   action: 'collapse' | 'expand-lazy' | 'expand-full';
+  nonce: number;
+}
+
+export interface SidebarNavigateFolderSignal {
+  provider: CloudProvider;
+  path: string;
+  expand?: boolean;
   nonce: number;
 }
 
@@ -82,6 +96,7 @@ interface DraggingItem {
 interface SidebarProps {
   files: CloudFile[];
   activeFileId: string | null;
+  selectedFolder?: SelectedExplorerFolder | null;
   cloudProvider: CloudProvider;
   workspaceName: string;
   isConnected: boolean;
@@ -94,6 +109,7 @@ interface SidebarProps {
   canMoveFolders: boolean;
   defaultFoldersExpanded?: boolean;
   folderActionSignal?: SidebarFolderActionSignal | null;
+  navigateToFolderSignal?: SidebarNavigateFolderSignal | null;
   moveConflict?: SidebarMoveConflict | null;
   drives?: Record<string, H2DriveStatus>;
   selectedDrive?: CloudProvider;
@@ -104,6 +120,7 @@ interface SidebarProps {
   onRefreshTree?: () => void;
   onExpandFolder: (folder: CloudFile) => void;
   onSelectFile: (fileId: string) => void;
+  onSelectFolder?: (folder: SelectedExplorerFolder) => void;
   onCreateFile: (path: string, content?: string) => void;
   onCreateFolder: (folderPath: string, parentFolderId?: string, parentProvider?: CloudProvider) => void;
   onDeleteFile: (fileId: string) => void;
@@ -128,6 +145,7 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({
   files,
   activeFileId,
+  selectedFolder = null,
   cloudProvider,
   workspaceName,
   isConnected,
@@ -140,6 +158,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   canMoveFolders,
   defaultFoldersExpanded = false,
   folderActionSignal = null,
+  navigateToFolderSignal = null,
   moveConflict = null,
   drives,
   selectedDrive,
@@ -150,6 +169,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onRefreshTree,
   onExpandFolder,
   onSelectFile,
+  onSelectFolder,
   onCreateFile,
   onCreateFolder,
   onDeleteFile,
@@ -167,6 +187,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [folderOpenOverrides, setFolderOpenOverrides] = useState<Record<string, boolean>>({});
   const [isFullExpanding, setIsFullExpanding] = useState(false);
   const fullExpandCountRef = useRef(0);
+  const folderRowRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [showNewFileInput, setShowNewFileInput] = useState(false);
   const [showNewFolderInput, setShowNewFolderInput] = useState(false);
   const [newPathInput, setNewPathInput] = useState('');
@@ -190,8 +211,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [conflictRenameInput, setConflictRenameInput] = useState('');
 
   const fileCount = React.useMemo(
-    () => files.filter(f => !f.isDirectory && !f.isUntitled).length,
-    [files]
+    () =>
+      files.filter(
+        f =>
+          !f.isDirectory &&
+          !f.isUntitled &&
+          (!selectedDrive || selectedDrive === 'all' || !f.cloudProvider || f.cloudProvider === selectedDrive)
+      ).length,
+    [files, selectedDrive]
   );
 
   const connectedDrives = React.useMemo(() => {
@@ -199,17 +226,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
     return Object.entries(drives).filter(([, status]) => status?.connected);
   }, [drives]);
 
-  // Filter files if searching (untitled files live strictly in the tab bar until saved)
+  // Filter files by active drive & search term (untitled files live strictly in the tab bar until saved)
   const filteredFiles = React.useMemo(
     () =>
       files.filter(
         f =>
           !f.isUntitled &&
+          (!selectedDrive || selectedDrive === 'all' || !f.cloudProvider || f.cloudProvider === selectedDrive) &&
           (!searchTerm ||
             f.path.toLowerCase().includes(searchTerm.toLowerCase()) ||
             f.name.toLowerCase().includes(searchTerm.toLowerCase()))
       ),
-    [files, searchTerm]
+    [files, selectedDrive, searchTerm]
   );
 
   const fileTree = React.useMemo(() => buildFileTree(filteredFiles), [filteredFiles]);
@@ -220,6 +248,50 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setIsFullExpanding(false);
     fullExpandCountRef.current = 0;
   }, [defaultFoldersExpanded, cloudProvider, workspaceName]);
+
+  // Programmatically expand ancestors & scroll to a target folder (e.g. "Monarch IDE" shortcut -> tmp)
+  // Placed AFTER the reset effect above so overrides aren't cleared on workspace switch.
+  // Never calls .focus() on DOM elements so keyboard cursor stays inside Monaco editor.
+  useEffect(() => {
+    if (!navigateToFolderSignal) return;
+    const cleanPath = navigateToFolderSignal.path.replace(/^\/+|\/+$/g, '');
+    if (!cleanPath) return;
+
+    const segments = cleanPath.split('/').filter(Boolean);
+    const expandUpdates: Record<string, boolean> = {};
+    let accum = '';
+    for (const seg of segments) {
+      accum = accum ? `${accum}/${seg}` : seg;
+      if (navigateToFolderSignal.expand !== false || accum !== cleanPath) {
+        expandUpdates[accum] = true;
+      }
+    }
+
+    setFolderOpenOverrides(prev => ({ ...prev, ...expandUpdates }));
+
+    let ancestorPath = '';
+    for (const seg of segments) {
+      ancestorPath = ancestorPath ? `${ancestorPath}/${seg}` : seg;
+      const dirItem = files.find(
+        f =>
+          f.isDirectory &&
+          f.path === ancestorPath &&
+          (!navigateToFolderSignal.provider || f.cloudProvider === navigateToFolderSignal.provider)
+      );
+      if (dirItem && dirItem.childrenLoaded === false && !dirItem.isLoadingChildren) {
+        onExpandFolder(dirItem);
+      }
+    }
+
+    const rowKey = `${navigateToFolderSignal.provider}:${cleanPath}`;
+    window.requestAnimationFrame(() => {
+      const el = folderRowRefs.current[rowKey];
+      if (el) {
+        el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navigateToFolderSignal?.nonce]);
 
   // Sync suggested path whenever a new move/rename collision occurs
   useEffect(() => {
@@ -322,8 +394,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [folderActionSignal?.nonce]);
 
-  const handleToggleFolder = (node: FileTreeNode) => {
+  const handleToggleFolder = (node: FileTreeNode, folderProvider: CloudProvider) => {
     const folderFile = node.file;
+    onSelectFolder?.({
+      provider: folderProvider,
+      path: node.path,
+      folderId: folderFile?.folderId,
+    });
+
     const currentlyExpanded = isFolderCurrentlyExpanded(node);
 
     // If deeper folder contents were not loaded yet (childrenLoaded === false), trigger H2_LIST_FOLDER_REQ
@@ -459,6 +537,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
         const folderProvider = getNodeProvider(node);
         const isRenamingThisFolder = renamingFolder?.path === node.path && !isReadOnly;
         const isDropTarget = dropTargetPath === node.path;
+        const isFolderSelected = Boolean(
+          selectedFolder &&
+            selectedFolder.path === node.path &&
+            (!selectedFolder.provider || selectedFolder.provider === folderProvider)
+        );
+        const folderRowKey = `${folderProvider}:${node.path}`;
 
         return (
           <div key={`dir-${node.path}`} className="select-auto">
@@ -500,6 +584,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </form>
             ) : (
               <div
+                ref={el => {
+                  if (el) {
+                    folderRowRefs.current[folderRowKey] = el;
+                  } else {
+                    delete folderRowRefs.current[folderRowKey];
+                  }
+                }}
                 draggable={!isReadOnly && canMoveFolders && !isConfirmingDelete}
                 onDragStart={e => {
                   if (isReadOnly || !canMoveFolders) return;
@@ -556,14 +647,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     targetProvider: folderProvider,
                   });
                 }}
-                onClick={() => handleToggleFolder(node)}
+                onClick={() => handleToggleFolder(node, folderProvider)}
                 style={{ paddingLeft: `${depth * 14 + 10}px` }}
                 className={`flex items-center justify-between py-1 pr-2 cursor-pointer text-xs group transition-colors ${
                   isDropTarget
                     ? dropInvalidReason
                       ? 'bg-red-50 dark:bg-red-950/40 ring-1 ring-inset ring-red-500/70 text-red-700 dark:text-red-300'
                       : 'bg-emerald-50 dark:bg-emerald-950/50 ring-1 ring-inset ring-emerald-500 text-emerald-900 dark:text-emerald-200'
-                    : 'hover:bg-slate-200/70 dark:hover:bg-zinc-800/60 text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200'
+                    : isFolderSelected
+                      ? 'bg-blue-50 dark:bg-blue-950/45 text-blue-800 dark:text-blue-200 border-l-2 border-blue-600 dark:border-blue-400'
+                      : 'hover:bg-slate-200/70 dark:hover:bg-zinc-800/60 text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200'
                 }`}
                 title={
                   isLazyUnloaded
@@ -756,7 +849,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
             e.dataTransfer.setData('text/plain', file.path);
           }}
           onDragEnd={clearDragState}
-          onClick={() => onSelectFile(file.id)}
+          onClick={() => {
+            const parentPath = (file.parentRelativePath ?? getParentPath(file.path)).replace(
+              /^\/+|\/+$/g,
+              ''
+            );
+            const parentDir = parentPath
+              ? files.find(
+                  d =>
+                    d.isDirectory &&
+                    d.path === parentPath &&
+                    (!file.cloudProvider || d.cloudProvider === file.cloudProvider)
+                )
+              : undefined;
+            onSelectFolder?.({
+              provider: file.cloudProvider,
+              path: parentPath,
+              folderId: parentDir?.folderId ?? file.parentId,
+            });
+            onSelectFile(file.id);
+          }}
           style={{ paddingLeft: `${depth * 14 + 16}px` }}
           className={`flex items-center justify-between py-1 pr-2 cursor-pointer text-xs group transition-colors ${
             isFileActive
@@ -930,7 +1042,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 onClick={() => {
                   setShowNewFileInput(true);
                   setShowNewFolderInput(false);
-                  setNewPathInput('');
+                  setNewPathInput(selectedFolder?.path ? `${selectedFolder.path}/` : '');
                 }}
                 className="p-1 hover:bg-slate-200 dark:hover:bg-zinc-800 hover:text-slate-900 dark:hover:text-white rounded text-slate-500 dark:text-zinc-400 transition"
                 title="New File (supports nested paths e.g. src/utils/new.ts)"
@@ -943,8 +1055,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 onClick={() => {
                   setShowNewFolderInput(true);
                   setShowNewFileInput(false);
-                  setNewFolderContext(null);
-                  setNewPathInput('');
+                  setNewFolderContext(
+                    selectedFolder?.path
+                      ? {
+                          parentFolderId: selectedFolder.folderId,
+                          parentProvider: selectedFolder.provider,
+                        }
+                      : null
+                  );
+                  setNewPathInput(selectedFolder?.path ? `${selectedFolder.path}/` : '');
                 }}
                 className="p-1 hover:bg-slate-200 dark:hover:bg-zinc-800 hover:text-slate-900 dark:hover:text-white rounded text-slate-500 dark:text-zinc-400 transition"
                 title="New Folder"
@@ -1174,6 +1293,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
         className={`flex-1 overflow-y-auto py-1 transition-colors ${
           dropTargetPath === '__root__' ? 'bg-blue-50/40 dark:bg-blue-950/15' : ''
         }`}
+        onClick={e => {
+          if (e.target === e.currentTarget) {
+            const activeProv =
+              selectedDrive && selectedDrive !== 'all'
+                ? selectedDrive
+                : cloudProvider !== 'all' && cloudProvider !== 'Standalone'
+                  ? cloudProvider
+                  : '';
+            if (activeProv) {
+              onSelectFolder?.({ provider: activeProv, path: '', folderId: undefined });
+            }
+          }
+        }}
         onDragOver={e => {
           if (!draggingItem || draggingItem.parentPath === '' || isReadOnly) return;
           e.preventDefault();

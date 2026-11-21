@@ -19,6 +19,7 @@ import {
   CloudProvider,
   OpenTab,
   OpenTabKind,
+  SelectedExplorerFolder,
   BRIDGE_STATUS_TAB_ID,
   BRIDGE_DEBUGGER_TAB_ID,
   PREFERENCES_TAB_ID,
@@ -46,6 +47,7 @@ import { MenuBar } from './components/MenuBar';
 import {
   Sidebar,
   SidebarFolderActionSignal,
+  SidebarNavigateFolderSignal,
   SidebarMoveConflict,
 } from './components/Sidebar';
 import { TabsBar } from './components/TabsBar';
@@ -89,9 +91,12 @@ export default function App() {
   const minimap = settings.minimap;
   const isSidebarOpen = settings.sidebarOpen;
 
-  // State: Resizable sidebar drag status & folder expand/collapse trigger
+  // State: Resizable sidebar drag status, folder expand/collapse trigger & active Explorer folder
   const [isResizingSidebar, setIsResizingSidebar] = useState(false);
   const [folderActionSignal, setFolderActionSignal] = useState<SidebarFolderActionSignal | null>(null);
+  const [selectedFolder, setSelectedFolder] = useState<SelectedExplorerFolder | null>(null);
+  const [navigateToFolderSignal, setNavigateToFolderSignal] =
+    useState<SidebarNavigateFolderSignal | null>(null);
 
   // State: Cursor telemetry
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
@@ -114,6 +119,9 @@ export default function App() {
   const readCloudFileRef = useRef<((file: CloudFile) => Promise<void>) | null>(null);
   const filesRef = useRef<CloudFile[]>(files);
   const knownBridgeDrivesRef = useRef<string[]>(settings.knownBridgeDrives);
+  const settingsRef = useRef(settings);
+  const handleNewFileRef = useRef<() => void>(() => {});
+  const pendingShortcutTargetRef = useRef<{ provider: CloudProvider; folderPath: string } | null>(null);
   const untitledCounterRef = useRef<number>(1);
   const latestContentByIdRef = useRef<Record<string, string>>({});
   const pendingSaveThenCloseIdsRef = useRef<Set<string>>(new Set());
@@ -124,7 +132,8 @@ export default function App() {
 
   useEffect(() => {
     knownBridgeDrivesRef.current = settings.knownBridgeDrives;
-  }, [settings.knownBridgeDrives]);
+    settingsRef.current = settings;
+  }, [settings]);
 
   // Status toast helper
   const notify = useCallback((msg: string) => {
@@ -327,6 +336,14 @@ export default function App() {
     directStartupDrive: settings.directStartupDrive,
     onDrivesDiscovered: handleDrivesDiscovered,
     onStartupSkippedNotice: notify,
+    onMonarchShortcutLaunched: ({ provider }) => {
+      handleNewFileRef.current();
+      setSelectedDrive(provider);
+      const rawTarget = settingsRef.current.monarchShortcutFolder || '';
+      const cleanTarget = rawTarget.trim().replace(/^\/+|\/+$/g, '');
+      setSelectedFolder({ provider, path: cleanTarget, folderId: undefined });
+      pendingShortcutTargetRef.current = { provider, folderPath: cleanTarget };
+    },
     onWorkspaceTreeLoaded: (incomingItems, provider, rootName, primaryRelativePath) => {
       setMoveConflict(null);
       const primaryFile = primaryRelativePath
@@ -341,25 +358,164 @@ export default function App() {
           )
         : incomingItems;
 
-      setFiles(hydratedList);
+      // Always preserve untitled scratchpad files and unsaved dirty edits across drive switches / tree reloads
+      const prevFiles = filesRef.current;
+      const untitledFiles = prevFiles.filter(f => f.isUntitled);
+      const dirtyCloudFiles = prevFiles.filter(f => !f.isDirectory && !f.isUntitled && f.isDirty);
+
+      const hydratedWithDirty = hydratedList.map(item => {
+        if (!item.isDirectory) {
+          const dirtyMatch = dirtyCloudFiles.find(
+            d => d.path === item.path && (!d.cloudProvider || d.cloudProvider === item.cloudProvider)
+          );
+          if (dirtyMatch) {
+            return {
+              ...item,
+              content: dirtyMatch.content,
+              contentLoaded: true,
+              isLoadingContent: false,
+              isDirty: true,
+              externalVersion: dirtyMatch.externalVersion,
+            };
+          }
+        }
+        return item;
+      });
+
+      const unmergedDirty = dirtyCloudFiles.filter(
+        d =>
+          !hydratedList.some(
+            item =>
+              !item.isDirectory &&
+              item.path === d.path &&
+              (!d.cloudProvider || d.cloudProvider === item.cloudProvider)
+          )
+      );
+
+      const nextFiles = [...hydratedWithDirty, ...unmergedDirty, ...untitledFiles];
+      filesRef.current = nextFiles;
+      setFiles(nextFiles);
       setCloudProvider(provider);
       setSelectedDrive(provider);
       setWorkspaceName(rootName || 'Cloud Workspace');
 
+      const retainedFileIdSet = new Set(nextFiles.filter(f => !f.isDirectory).map(f => f.id));
+
+      setOpenTabs(prevTabs => {
+        const preservedTabs = prevTabs.filter(
+          t =>
+            t.kind === 'bridge-status' ||
+            t.kind === 'bridge-debugger' ||
+            t.kind === 'preferences' ||
+            retainedFileIdSet.has(t.fileId)
+        );
+
+        if (primaryFile) {
+          const alreadyOpen = preservedTabs.some(t => t.fileId === primaryFile.id);
+          return alreadyOpen
+            ? preservedTabs
+            : [
+                ...preservedTabs,
+                {
+                  fileId: primaryFile.id,
+                  path: primaryFile.path,
+                  title: primaryFile.name,
+                  previewMode: 'split',
+                },
+              ];
+        }
+        return preservedTabs;
+      });
+
       if (primaryFile) {
-        setOpenTabs([
-          {
-            fileId: primaryFile.id,
-            path: primaryFile.path,
-            title: primaryFile.name,
-            previewMode: 'split',
-          },
-        ]);
         setActiveTabId(primaryFile.id);
         readCloudFileRef.current?.(primaryFile);
       } else {
-        setOpenTabs([]);
-        setActiveTabId(null);
+        setActiveTabId(curr => {
+          if (!curr) return null;
+          if (
+            curr === BRIDGE_STATUS_TAB_ID ||
+            curr === BRIDGE_DEBUGGER_TAB_ID ||
+            curr === PREFERENCES_TAB_ID ||
+            retainedFileIdSet.has(curr)
+          ) {
+            return curr;
+          }
+          const fallbackOpen = nextFiles.find(f => !f.isDirectory && (f.isUntitled || f.isDirty));
+          return fallbackOpen?.id ?? null;
+        });
+      }
+
+      // If triggered by the custom "Monarch IDE" pcloud shortcut, highlight & expand the configured folder
+      const shortcutTarget = pendingShortcutTargetRef.current;
+      if (shortcutTarget && (!provider || provider === shortcutTarget.provider)) {
+        pendingShortcutTargetRef.current = null;
+        const desiredPath = shortcutTarget.folderPath.trim().replace(/^\/+|\/+$/g, '');
+        if (desiredPath) {
+          const matchedDir =
+            incomingItems.find(
+              item =>
+                item.isDirectory &&
+                item.path === desiredPath &&
+                (!item.cloudProvider || item.cloudProvider === provider)
+            ) ||
+            incomingItems.find(
+              item =>
+                item.isDirectory &&
+                item.path.toLowerCase() === desiredPath.toLowerCase() &&
+                (!item.cloudProvider || item.cloudProvider === provider)
+            );
+
+          if (matchedDir) {
+            const targetProv = matchedDir.cloudProvider || provider;
+            setSelectedFolder({
+              provider: targetProv,
+              path: matchedDir.path,
+              folderId: matchedDir.folderId,
+            });
+            setNavigateToFolderSignal({
+              provider: targetProv,
+              path: matchedDir.path,
+              expand: true,
+              nonce: Date.now() + Math.random(),
+            });
+          } else {
+            setSelectedFolder({ provider, path: '', folderId: undefined });
+            notify(`Shortcut folder "${desiredPath}" was not found on ${provider}; using root.`);
+          }
+        } else {
+          setSelectedFolder({ provider, path: '', folderId: undefined });
+        }
+      } else if (primaryFile) {
+        const parentPath = (primaryFile.parentRelativePath || '').replace(/^\/+|\/+$/g, '');
+        const parentDir = parentPath
+          ? incomingItems.find(
+              d =>
+                d.isDirectory &&
+                d.path === parentPath &&
+                (!primaryFile.cloudProvider || d.cloudProvider === primaryFile.cloudProvider)
+            )
+          : undefined;
+        setSelectedFolder({
+          provider: primaryFile.cloudProvider || provider,
+          path: parentPath,
+          folderId: parentDir?.folderId ?? primaryFile.parentId,
+        });
+      } else if (primaryRelativePath) {
+        const cleanPrimary = primaryRelativePath.replace(/^\/+|\/+$/g, '');
+        const launchedDir = incomingItems.find(d => d.isDirectory && d.path === cleanPrimary);
+        setSelectedFolder({
+          provider: launchedDir?.cloudProvider || provider,
+          path: launchedDir ? launchedDir.path : '',
+          folderId: launchedDir?.folderId,
+        });
+      } else {
+        setSelectedFolder(prev => {
+          if (prev && (provider === 'all' || !prev.provider || prev.provider === provider)) {
+            return prev;
+          }
+          return { provider: provider === 'all' ? '' : provider, path: '', folderId: undefined };
+        });
       }
 
       const fileCount = incomingItems.filter(i => !i.isDirectory).length;
@@ -843,6 +999,11 @@ export default function App() {
   const handleSelectDrive = useCallback(
     (drive: CloudProvider) => {
       setSelectedDrive(drive);
+      setSelectedFolder({
+        provider: drive === 'all' ? '' : drive,
+        path: '',
+        folderId: undefined,
+      });
       switchDriveRoot(drive, 2);
     },
     [switchDriveRoot]
@@ -853,6 +1014,11 @@ export default function App() {
     const scope = handshakeInfo?.launchedScope;
     if (!scope) return;
     setSelectedDrive(scope.provider);
+    setSelectedFolder({
+      provider: scope.provider,
+      path: '',
+      folderId: scope.rootFolderId,
+    });
     requestWorkspaceTree({
       provider: scope.provider,
       driveRoot: false,
@@ -1025,6 +1191,10 @@ export default function App() {
     setEditorFocusSignal({ fileId: newId, nonce: Date.now() + Math.random() });
     notify(`New untitled file: ${title}`);
   }, [notify]);
+
+  useEffect(() => {
+    handleNewFileRef.current = handleNewFile;
+  }, [handleNewFile]);
 
   // Content edits
   const handleContentChange = useCallback(
@@ -1284,6 +1454,12 @@ export default function App() {
             )
           );
         }
+
+        setSelectedFolder({
+          provider: resolvedProvider,
+          path: resolvedParent,
+          folderId: res.parentFolderId,
+        });
 
         notify(`Saved ${resolvedPath} to ${resolvedProvider}`);
         return true;
@@ -2490,6 +2666,7 @@ export default function App() {
               <Sidebar
                 files={files}
                 activeFileId={activeTabId}
+                selectedFolder={selectedFolder}
                 cloudProvider={cloudProvider}
                 workspaceName={workspaceName}
                 isConnected={extensionStatus === 'connected'}
@@ -2502,6 +2679,7 @@ export default function App() {
                 canMoveFolders={canMoveFolders}
                 defaultFoldersExpanded={settings.sidebarDefaultFoldersExpanded}
                 folderActionSignal={folderActionSignal}
+                navigateToFolderSignal={navigateToFolderSignal}
                 moveConflict={moveConflict}
                 drives={handshakeInfo?.drives}
                 selectedDrive={selectedDrive}
@@ -2512,6 +2690,7 @@ export default function App() {
                 onRefreshTree={handleRefreshTree}
                 onExpandFolder={handleExpandFolder}
                 onSelectFile={handleSelectFile}
+                onSelectFolder={setSelectedFolder}
                 onCreateFile={handleCreateFile}
                 onCreateFolder={handleCreateFolder}
                 onDeleteFile={handleDeleteFile}
@@ -2722,6 +2901,7 @@ export default function App() {
         isOpen={Boolean(saveAsTargetFile)}
         targetFile={saveAsTargetFile}
         files={files}
+        selectedFolder={selectedFolder}
         isBridgeConnected={extensionStatus === 'connected'}
         isReadOnly={isReadOnly}
         canSave={canSave}

@@ -201,6 +201,12 @@ export type UiColorMode = 'light' | 'dark';
 
 export type DirectStartupDriveMode = 'all' | 'single' | 'none';
 
+export interface SelectedExplorerFolder {
+  provider: CloudProvider;
+  path: string;
+  folderId?: string;
+}
+
 /**
  * Persisted IDE user preferences stored in localStorage and exported/imported via JSON.
  * Strictly separate from Clockie H2 bridge sessionId (which stays in per-tab sessionStorage).
@@ -248,5 +254,7 @@ export interface IdeSettings {
   directStartupDrive: string;
   /** Locally cached list of drive keys discovered from Clockie H2 for offline preferences UI */
   knownBridgeDrives: string[];
+  /** Default pCloud folder opened/selected when launched via the Clockie H2 "Monarch IDE" shortcut */
+  monarchShortcutFolder: string;
 }
 
